@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MiuBall</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@400;600;700&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="app">
+    <section id="setup-screen">
+      <h1 id="title">MiuBall</h1>
+      <button id="start-btn" disabled>
+        <img src="assets/start-logo.png" alt="시작" />
+      </button>
+      <p class="hint">참가자 이름을 한 줄에 한 명씩 입력하세요 (최소 2명)</p>
+      <textarea id="name-input" rows="4" placeholder="예)&#10;철수&#10;영희&#10;민수"></textarea>
+      <div id="participant-count">참가자: 0명</div>
+    </section>
+
+    <section id="race-screen" class="hidden">
+      <canvas id="game-canvas"></canvas>
+
+      <aside id="rank-panel">
+        <h3>실시간 순위</h3>
+        <ol id="rank-list"></ol>
+      </aside>
+
+      <div id="final-overlay" class="hidden">
+        <h2>🏁 최종 순위</h2>
+        <ol id="final-rank-list"></ol>
+        <button id="restart-btn" class="hidden">다시하기</button>
+      </div>
+    </section>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

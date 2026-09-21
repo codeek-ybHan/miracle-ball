@@ -1,0 +1,289 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: #05060f;
+  color: #f4f6ff;
+  font-family: 'Nunito', 'Malgun Gothic', sans-serif;
+}
+
+#app {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Setup screen */
+#setup-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+#title {
+  margin: 0 0 4px;
+  font-family: 'Baloo 2', sans-serif;
+  font-weight: 800;
+  letter-spacing: 4px;
+  color: #ffe066;
+  text-shadow: 0 0 16px rgba(255, 224, 102, 0.55);
+}
+
+.hint {
+  font-size: 13px;
+  color: #9aa3d1;
+  margin: 0;
+  text-align: center;
+}
+
+#name-input {
+  width: 100%;
+  max-width: 300px;
+  height: 90px;
+  margin-top: 20px;
+  resize: vertical;
+  background: none;
+  color: #f4f6ff;
+  border: 2px solid #3a4270;
+  border-radius: 14px;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+#name-input:focus {
+  outline: none;
+  border-color: #5ee0ff;
+}
+
+#participant-count {
+  font-size: 14px;
+  color: #9aa3d1;
+}
+
+#restart-btn {
+  padding: 12px 32px;
+  font-family: 'Baloo 2', sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  border: none;
+  border-radius: 999px;
+  background: #5ee0ff;
+  color: #05060f;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+#restart-btn:hover {
+  transform: translateY(-2px);
+}
+
+#restart-btn:active {
+  transform: translateY(0);
+}
+
+#start-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 220px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+#start-btn img {
+  width: 100%;
+  height: auto;
+  display: block;
+  filter: invert(1);
+}
+
+#start-btn:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.03);
+}
+
+#start-btn:active:not(:disabled) {
+  transform: translateY(0) scale(1);
+}
+
+#start-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Race screen: canvas fills the whole viewport, rank panel floats on top */
+#race-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #05060f;
+}
+
+canvas#game-canvas {
+  background: #12183f;
+  display: block;
+  transition: opacity 0.4s ease;
+}
+
+/* Once the first marble finishes, the still-running race becomes a dimmed
+   backdrop behind the final-ranking overlay instead of the main focus. */
+canvas#game-canvas.dimmed {
+  opacity: 0.3;
+}
+
+#rank-panel {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 210px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  background: rgba(18, 24, 63, 0.55);
+  backdrop-filter: blur(3px);
+  border: 1px solid rgba(108, 120, 201, 0.4);
+  border-radius: 14px;
+  padding: 12px;
+  transition: opacity 0.4s ease;
+}
+
+#rank-panel.dimmed {
+  opacity: 0.3;
+}
+
+#rank-panel h3 {
+  margin: 0 0 10px;
+  font-family: 'Baloo 2', sans-serif;
+  font-size: 14px;
+  color: #c7cdf5;
+}
+
+/* Centered "game over" overlay: appears the instant 1st place is decided,
+   so it's unmistakable the result is in even while the rest of the pack is
+   still visibly racing (dimmed) behind it. */
+#final-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 10;
+  width: min(320px, 80vw);
+  max-height: 80vh;
+  overflow-y: auto;
+  background: rgba(12, 16, 40, 0.92);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 224, 102, 0.45);
+  border-radius: 20px;
+  padding: 22px;
+  box-shadow: 0 0 60px rgba(0, 0, 0, 0.55), 0 0 30px rgba(255, 224, 102, 0.12);
+  text-align: center;
+}
+
+#final-overlay h2 {
+  margin: 0 0 14px;
+  font-family: 'Baloo 2', sans-serif;
+  font-size: 20px;
+  letter-spacing: 1px;
+  color: #ffe066;
+  text-shadow: 0 0 14px rgba(255, 224, 102, 0.5);
+}
+
+#rank-list,
+#final-rank-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+#rank-list li,
+#final-rank-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 5px 8px;
+  border-radius: 10px;
+}
+
+#final-overlay #final-rank-list li {
+  font-size: 15px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.rank-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: rgba(35, 43, 92, 0.9);
+  color: #c7cdf5;
+  font-family: 'Baloo 2', sans-serif;
+  font-size: 11px;
+}
+
+.rank-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.rank-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#final-rank-list li:nth-child(1) .rank-num {
+  background: #ffd45e;
+  color: #4a2f00;
+}
+
+#final-rank-list li:nth-child(2) .rank-num {
+  background: #d7dcf5;
+  color: #2a2f4a;
+}
+
+#final-rank-list li:nth-child(3) .rank-num {
+  background: #e0a672;
+  color: #3a2410;
+}
+
+#restart-btn {
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px;
+  font-size: 14px;
+}
