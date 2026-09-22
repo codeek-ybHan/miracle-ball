@@ -91,16 +91,6 @@ function drawBumper(body) {
   ctx.stroke();
 }
 
-function drawTrampoline(body) {
-  const lit = body.plugin && performance.now() < body.plugin.flashUntil;
-  pathVertices(body);
-  ctx.fillStyle = lit ? COLORS.trampolineFlash : COLORS.trampoline;
-  ctx.fill();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = COLORS.trampolineEdge;
-  ctx.stroke();
-}
-
 const BOUNCE_PAD_ANIM_MS = BOUNCE_PAD_SINK_MS + BOUNCE_PAD_SPRING_MS + BOUNCE_PAD_SETTLE_MS;
 
 // Positive = the mat's center dipping down (sinking under a landing
@@ -179,7 +169,6 @@ function drawBodies(bodies) {
     if (body.label === 'spinner') return;
     if (body.label === 'bumper') return drawBumper(body);
     if (body.label === 'peg') return drawPeg(body);
-    if (body.label === 'trampoline') return drawTrampoline(body);
     if (body.label === 'bouncePad') return drawBouncePad(body);
     drawWall(body);
   });

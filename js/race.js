@@ -17,12 +17,6 @@ import {
   WIND_VORTEX_BURST_FORCE,
   WIND_VORTEX_CYCLE_MS,
   WIND_VORTEX_BURST_MS,
-  TRAMPOLINE_WIDTH,
-  TRAMPOLINE_THICKNESS,
-  TRAMPOLINE_TRIGGER_RATIO,
-  TRAMPOLINE_TRIGGER_MIN,
-  TRAMPOLINE_MAX_WAIT_MS,
-  TRAMPOLINE_LAUNCH_SPEED,
   BOUNCE_PAD_FLASH_MS,
   BOUNCE_PAD_LAUNCH_SPEED,
   WALL_PUSH_MARGIN,
@@ -85,11 +79,6 @@ export class Race {
         } else if (other.label === 'spinner') {
           const marbleBody = bodyA.label === 'marble' ? bodyA : bodyB;
           particleManager.spawnSpark(marbleBody.position.x, marbleBody.position.y, COLORS.spinner, 10);
-        } else if (other.label === 'trampoline') {
-          // Just a small "landed" flash here — the actual group launch is
-          // decided in checkTrampolines() once enough racers are resting.
-          other.plugin.flashUntil = performance.now() + BUMPER_FLASH_MS;
-          particleManager.spawnSpark(other.position.x, other.position.y, COLORS.trampoline, 6);
         } else if (other.label === 'bouncePad') {
           // A direct velocity kick, not restitution, is what actually sends
           // the marble flying (see config.js's BOUNCE_PAD_LAUNCH_SPEED for
@@ -141,7 +130,6 @@ export class Race {
     }
     this.clampSpeeds();
     particleManager.update(deltaMs);
-    this.checkTrampolines(deltaMs);
 
     this.marbles.forEach((m) => {
       if (!m.finished && m.body.position.y > GOAL_Y) {
@@ -223,11 +211,42 @@ export class Race {
   applyWindVortices(marble) {
     if (this.windVortices.length === 0) return;
     const bursting = this.isWindVortexBursting();
+    const y = marble.body.position.y;
     this.windVortices.forEach((vortex) => {
+      // The actual center-alignment guarantee: detects an actual CROSSING
+      // of the vortex's exact y this frame (this position vs. last frame's)
+      // instead of checking "is y currently within some fixed band around
+      // it" — a fixed-width band can still get jumped clean over in one
+      // physics step by a marble moving fast, or one a burst has already
+      // flung far off to the side (that first version of this method gated
+      // the band check on overall distance, so a marble knocked far enough
+      // sideways had distance > RADIUS even with a tiny dy, and sailed
+      // through without ever being caught — the actual bug this replaces).
+      // There's no way to cross the line itself without being seen on each
+      // side of it, however far a lag spike's frame delta moves you.
+      const prevY = marble.vortexPrevY === undefined ? y : marble.vortexPrevY;
+      marble.vortexPrevY = y;
+      if ((prevY < vortex.y && y >= vortex.y) || (prevY > vortex.y && y <= vortex.y)) {
+        physics.setBodyPosition(marble.body, { x: vortex.x, y });
+        physics.setBodyVelocity(marble.body, { x: 0, y: marble.body.velocity.y });
+        return;
+      }
+
+      // Once a marble is past the vortex's y, leave it alone — this was the
+      // other half of the same bug: a marble that had JUST been centered by
+      // the snap above is still well inside RADIUS on the very next frame,
+      // so without this it could immediately get caught by an outward burst
+      // again right after crossing, with nothing left downstream to correct
+      // it a second time (the snap above only fires once, exactly at the
+      // crossing). The pull/swirl/burst below is only for marbles still
+      // approaching from above.
+      if (y >= vortex.y) return;
+
       const dx = vortex.x - marble.body.position.x;
       const dy = vortex.y - marble.body.position.y;
       const dist = Math.hypot(dx, dy);
-      if (dist < 1 || dist > WIND_VORTEX_RADIUS) return;
+      if (dist > WIND_VORTEX_RADIUS || dist < 1) return;
+
       const falloff = 1 - dist / WIND_VORTEX_RADIUS;
       if (bursting) {
         const strength = WIND_VORTEX_BURST_FORCE * falloff;
@@ -263,75 +282,6 @@ export class Race {
     const falloff = 1 - Math.max(distToWall, 0) / WALL_PUSH_MARGIN;
     const direction = offsetFromCenter > 0 ? -1 : 1;
     physics.applyForceToBody(marble.body, { x: direction * WALL_PUSH_FORCE * falloff, y: 0 });
-  }
-
-  // Recomputes, every frame, which racers are currently resting on top of
-  // each trampoline (position + near-zero vertical speed) rather than
-  // tracking touches over time — self-correcting if a marble rolls off the
-  // side, so there's no separate "left the zone" bookkeeping to get wrong.
-  // Once enough are resting at once, they all launch together and the
-  // platform is removed for good.
-  checkTrampolines(deltaMs) {
-    this.walls.forEach((body) => {
-      if (body.label !== 'trampoline' || body.plugin.triggered) return;
-      if (body.plugin.requiredCount === null) {
-        body.plugin.requiredCount = Math.max(
-          TRAMPOLINE_TRIGGER_MIN,
-          Math.ceil(this.marbles.length * TRAMPOLINE_TRIGGER_RATIO)
-        );
-      }
-
-      const halfW = TRAMPOLINE_WIDTH / 2 - 4;
-      const topY = body.position.y - TRAMPOLINE_THICKNESS / 2;
-      const restY = topY - MARBLE_RADIUS;
-      // Zone covers the platform's *entire* depth (top to well past the
-      // bottom), not just a thin band near the top — a marble arriving with
-      // real velocity can penetrate past a narrow "near the top" zone in a
-      // single step or two before Matter fully resolves the overlap, and
-      // once past a narrow zone it would never be caught again and would
-      // just keep sinking under gravity. Catching it anywhere in this wider
-      // band and snapping it straight to the resting position removes that
-      // gap entirely, regardless of how deep it got before this check ran.
-      const resting = this.marbles.filter((m) => {
-        if (m.finished) return false;
-        const dx = m.body.position.x - body.position.x;
-        const dy = m.body.position.y - topY;
-        return Math.abs(dx) < halfW && dy > -(MARBLE_RADIUS + 4) && dy < TRAMPOLINE_THICKNESS + MARBLE_RADIUS + 30;
-      });
-
-      // Pin resting marbles exactly at the surface every frame instead of
-      // trusting Matter's resting-contact resolution to hold them there —
-      // under constant gravity a body resting on another for many frames
-      // (marbles can wait here up to TRAMPOLINE_MAX_WAIT_MS) drifts deeper
-      // each step until it ends up embedded in, or through, the platform.
-      // Explicitly locking position/velocity removes the drift entirely.
-      resting.forEach((m) => {
-        physics.setBodyPosition(m.body, { x: m.body.position.x, y: restY });
-        physics.setBodyVelocity(m.body, { x: 0, y: 0 });
-      });
-
-      // Most marbles fall past the platform without ever landing on it (it's
-      // narrower than the tube), so the group quota often can't be reached —
-      // whoever HAS been waiting still launches after TRAMPOLINE_MAX_WAIT_MS
-      // rather than sitting there for the rest of the race.
-      body.plugin.waitMs = resting.length > 0 ? body.plugin.waitMs + deltaMs : 0;
-
-      if (resting.length >= body.plugin.requiredCount || (resting.length > 0 && body.plugin.waitMs >= TRAMPOLINE_MAX_WAIT_MS)) {
-        this.triggerTrampoline(body, resting);
-      }
-    });
-  }
-
-  triggerTrampoline(body, resting) {
-    body.plugin.triggered = true;
-    resting.forEach((m) => {
-      const spread = (Math.random() - 0.5) * TRAMPOLINE_LAUNCH_SPEED;
-      physics.setBodyVelocity(m.body, { x: spread, y: -TRAMPOLINE_LAUNCH_SPEED });
-    });
-    particleManager.spawnSpark(body.position.x, body.position.y, COLORS.trampoline, 30);
-    particleManager.spawnSpark(body.position.x, body.position.y, COLORS.spark, 16);
-    physics.removeBody(body);
-    this.walls = this.walls.filter((w) => w !== body);
   }
 
   isFinished() {

@@ -114,6 +114,19 @@ body {
   color: #9aa3d1;
 }
 
+/* Dev/verification aid: lets whoever's looking at the page confirm they're
+   on a server that actually has the latest change, without needing to dig
+   through devtools or ask. Only ever holds the single most recent change —
+   replace the text here (and the date) rather than appending to it. */
+#changelog {
+  width: 100%;
+  max-width: 300px;
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: #6d76a8;
+  text-align: center;
+}
+
 #restart-btn {
   padding: 12px 32px;
   font-family: 'Baloo 2', sans-serif;

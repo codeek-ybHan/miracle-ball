@@ -17,10 +17,6 @@ import {
   WINDMILL_LENGTH,
   BUMPER_RADIUS,
   BUMPER_RESTITUTION,
-  TRAMPOLINE_WIDTH,
-  TRAMPOLINE_THICKNESS,
-  TRAMPOLINE_RESTITUTION,
-  TRAMPOLINE_FRICTION,
   BOUNCE_PAD_THICKNESS,
   BOUNCE_PAD_MARGIN,
   BOUNCE_PAD_RESTITUTION,
@@ -114,35 +110,24 @@ function pegField(startY, rowSpacing, rowCount, count, bodies) {
   }
 }
 
-// Trampoline: a flat static platform, kept narrow enough (with plenty of
-// margin) that it never gets close to either tube wall regardless of local
-// width, so it's just an island obstacle like the bumper. Low restitution +
-// high friction so marbles land and settle instead of bouncing — the actual
-// launch is a deliberate group event handled in race.js once enough racers
-// are resting on it at once.
-function trampoline(y, offsetRatio, angle, bodies) {
-  const body = physics.createRectBody(centerX(y) + offsetRatio * tubeHalfWidthAt(y), y, TRAMPOLINE_WIDTH, TRAMPOLINE_THICKNESS, {
-    isStatic: true,
-    restitution: TRAMPOLINE_RESTITUTION,
-    friction: TRAMPOLINE_FRICTION,
-    angle,
-    label: 'trampoline',
-  });
-  body.plugin = { flashUntil: 0, triggered: false, requiredCount: null, waitMs: 0 };
-  bodies.push(body);
-}
-
-// Bounce pad: fires on every single touch instead of waiting for a group to
-// gather like the trampoline does. The body itself only needs a modest
-// restitution — the actual launch is a direct velocity kick applied in
-// race.js's collision handler (see BOUNCE_PAD_LAUNCH_SPEED in config.js for
-// why). Width is sized off the local tube half-width (not a fixed constant
-// like the trampoline's) so it spans nearly the full passage and catches
+// Bounce pad: fires on every single touch, no gathering required. The body
+// itself only needs a modest restitution — the actual launch is a direct
+// velocity kick applied in race.js's collision handler (see
+// BOUNCE_PAD_LAUNCH_SPEED in config.js for why). Width is sized off the
+// local tube half-width so it spans nearly the full passage and catches
 // essentially everyone who comes through here, rather than being a narrow
 // island some marbles just fall past.
-function bouncePad(y, bodies) {
+//
+// x defaults to the tube's own centerline at y, but callers that need the
+// pad centered on some OTHER x (e.g. wherever the wind vortex just forced
+// every marble to) must pass it explicitly — the tube's centerline itself
+// drifts with the left/right wave, so a pad placed even 60px below the
+// vortex can already sit tens of px off from where marbles actually are,
+// which is exactly the kind of small-looking mismatch that, against a pad
+// only slightly wider than a marble, turns into most marbles missing it.
+function bouncePad(y, bodies, x = centerX(y)) {
   const width = 2 * (tubeHalfWidthAt(y) - BOUNCE_PAD_MARGIN);
-  const body = physics.createRectBody(centerX(y), y, width, BOUNCE_PAD_THICKNESS, {
+  const body = physics.createRectBody(x, y, width, BOUNCE_PAD_THICKNESS, {
     isStatic: true,
     restitution: BOUNCE_PAD_RESTITUTION,
     friction: BOUNCE_PAD_FRICTION,
@@ -272,39 +257,48 @@ export function createCourse() {
     spinners.push(new Spinner(centerX(y) + offsetRatio * tubeHalfWidthAt(y), y, length, 14, speed, COLORS.spinner));
   });
 
-  // 5. Updraft zone: slows/reverses whoever is currently in front, lets others catch up
-  windZones.push({ yStart: 1450 * S, yEnd: 1650 * S, forceY: WIND_FORCE_Y });
+  // 5. Wind vortex — every marble that falls through gets forced to dead
+  // center right at the vortex's own y (see race.js's applyWindVortices — a
+  // hard position snap, not just a force nudge, so it's an actual guarantee
+  // and not just "most of the time") before spending most of the cycle
+  // swirling marbles inward and briefly bursting them back outward. Given
+  // real breathing room on both sides (~205px clear of the spinner gauntlet
+  // above, 200px before the bounce pad below) instead of being crammed
+  // right up against its neighbors.
+  const vortexY = 1570 * S;
+  const vortexX = centerX(vortexY);
+  windVortices.push({ x: vortexX, y: vortexY });
 
-  // 5b. Wind vortex — not a solid body, so it can sit right after the
-  // updraft zone without needing any clearance. Spends most of its cycle
-  // swirling marbles inward, then bursts them back outward.
-  const vortexY = 1690 * S;
-  windVortices.push({ x: centerX(vortexY), y: vortexY });
+  // 5b. Bounce pad — sits a clean 200px after the vortex (nothing else in
+  // that gap), so the guaranteed centering above translates into a
+  // guaranteed hit here too: every marble already lines up dead center
+  // right where this pad is, instead of needing a wide pad to fish for
+  // whoever happens to drift into range. Explicitly centered on vortexX
+  // (not this y's own tube centerline — see bouncePad()'s comment for why
+  // that distinction actually matters here).
+  const bouncePadY = vortexY + 200;
+  bouncePad(bouncePadY, bodies, vortexX);
+
+  // 5c. Updraft zone: slows/reverses whoever is currently in front, lets
+  // others catch up. Starts 100px after the bounce pad (not overlapping it).
+  const updraftStart = bouncePadY + 100;
+  windZones.push({ yStart: updraftStart, yEnd: updraftStart + (1650 * S - 1440 * S), forceY: WIND_FORCE_Y });
 
   // 6. Zigzag slalom
-  slalomPlank(1730 * S, 0.1, 1, bodies);
-  slalomPlank(1840 * S, 0.1, -1, bodies);
-  slalomPlank(1950 * S, 0.1, 1, bodies);
-  slalomPlank(2060 * S, 0.1, -1, bodies);
+  slalomPlank(2030 * S, 0.1, 1, bodies);
+  slalomPlank(2140 * S, 0.1, -1, bodies);
+  slalomPlank(2250 * S, 0.1, 1, bodies);
+  slalomPlank(2360 * S, 0.1, -1, bodies);
 
   // 7. Peg field 2 (extra row so there's more time — and more chances to
   // get knocked around — before the next chokepoint)
-  pegField(2120 * S, 45 * S, 8, 5, bodies);
-
-  // 7b. Bounce pad — sits in the gap right after peg field 2, pushed as
-  // close to it as the gate row below allows so there's genuinely open
-  // space above it (a few hundred px) — room for the launch to actually
-  // read as a launch before a marble runs into the next thing, rather than
-  // popping up and immediately smacking back into whatever's right
-  // overhead. Every marble that lands here gets an immediate, dramatic
-  // bounce back upward, unlike the calmer group-gathering trampoline later
-  // in section 9b.
-  bouncePad(2650 * S, bodies);
+  pegField(2420 * S, 45 * S, 8, 5, bodies);
 
   // 8. Gate row (lane choice) — a third, center post narrows every lane
   // enough that picking one actually matters instead of all three being
-  // wide-open.
-  const gateY = 2700 * S;
+  // wide-open. Kept well clear of peg field 2 above it (224px of open
+  // space) so marbles have real room to settle before having to pick a lane.
+  const gateY = 3110 * S;
   [-0.4, 0, 0.4].forEach((offsetRatio) => {
     bodies.push(
       physics.createRectBody(centerX(gateY) + offsetRatio * tubeHalfWidthAt(gateY), gateY, 14, 80, {
@@ -317,11 +311,11 @@ export function createCourse() {
   // 8b. Magnet — pulls marbles in toward its center for most of its cycle,
   // then shoves them back out in a short burst, scattering whoever's nearby
   // when the burst lands.
-  const magnetY = 2864 * S;
+  const magnetY = 3274 * S;
   magnets.push({ x: centerX(magnetY), y: magnetY });
 
   // 9. Windmill
-  const windmillY = 3050 * S;
+  const windmillY = 3460 * S;
   spinners.push(
     new Spinner(
       centerX(windmillY),
@@ -333,29 +327,25 @@ export function createCourse() {
     )
   );
 
-  // 9b. Trampoline — a flat landing spot right after the windmill where
-  // marbles gather until enough have arrived, then all launch together.
-  trampoline(3164 * S, 0, 0, bodies);
-
   // 10. Power bumper arena 2 (late-race chaos)
-  bumper(3300 * S, -0.52, bodies);
-  bumper(3300 * S, 0.52, bodies);
-  bumper(3430 * S, 0, bodies);
+  bumper(3710 * S, -0.52, bodies);
+  bumper(3710 * S, 0.52, bodies);
+  bumper(3840 * S, 0, bodies);
 
   // 11. Peg field 3
-  pegField(3550 * S, 55 * S, 6, 5, bodies);
+  pegField(3960 * S, 55 * S, 6, 5, bodies);
 
   // 11b. Power bumper arena 3 (extra late-race chaos, extends the course)
-  bumper(3950 * S, -0.52, bodies);
-  bumper(3950 * S, 0.52, bodies);
-  bumper(4080 * S, 0, bodies);
+  bumper(4360 * S, -0.52, bodies);
+  bumper(4360 * S, 0.52, bodies);
+  bumper(4490 * S, 0, bodies);
 
   // 11c. Peg field 4 (one last deflection field before the run-in)
-  pegField(4180 * S, 45 * S, 3, 5, bodies);
+  pegField(4590 * S, 45 * S, 3, 5, bodies);
 
-  // 12. Final funnel into the goal corridor — 4350 must stay in sync with
+  // 12. Final funnel into the goal corridor — 4760 must stay in sync with
   // config.js's COURSE_HEIGHT/GOAL_Y (see the comment there).
-  funnelPair(4350 * S, 0.18, 20, bodies);
+  funnelPair(4760 * S, 0.18, 20, bodies);
 
   // Floor — thick enough that a marble carrying a lot of speed after the
   // full drop (or a late bumper fling) can't tunnel straight through a
