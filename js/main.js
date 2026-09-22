@@ -2,15 +2,37 @@ import { Race } from './race.js';
 import * as renderer from './renderer.js';
 import * as ui from './ui.js';
 import * as viewport from './viewport.js';
+import * as config from './config.js';
 
 let race = null;
 let lastTime = 0;
 let rafId = null;
 
 ui.initUI();
+
+// Restored before the very first setup preview renders below, so that
+// preview (and everything else) already reflects whichever theme was
+// picked last time instead of flashing the default first.
+const savedThemeId = localStorage.getItem('miracleball-theme');
+const initialThemeId = config.THEME_LIST.some((t) => t.id === savedThemeId) ? savedThemeId : 'dark';
+config.applyTheme(initialThemeId);
+ui.setSelectedTheme(initialThemeId);
+// Tracks which theme's course/marble-shape a Race should use — separate
+// from COLORS (which is mutated in place and read live by every consumer)
+// since the course layout and marble shape are chosen once per Race at
+// construction time, not read continuously each frame.
+let currentThemeId = initialThemeId;
+
 ui.bindNameInput();
 ui.bindShuffleButton();
 ui.bindStartButton(handleStart);
+ui.bindThemeButtons((themeId) => {
+  config.applyTheme(themeId);
+  currentThemeId = themeId;
+  localStorage.setItem('miracleball-theme', themeId);
+  ui.setSelectedTheme(themeId);
+  renderSetupPreview();
+});
 ui.bindRestartButton(() => {
   if (rafId !== null) cancelAnimationFrame(rafId);
   rafId = null;
@@ -47,7 +69,7 @@ resizeCanvas();
 function renderSetupPreview() {
   const names = ui.parseNames();
   const previewNames = names.length > 0 ? names : ['1', '2', '3'];
-  renderer.render(new Race(previewNames));
+  renderer.render(new Race(previewNames, currentThemeId));
 }
 ui.onNamesChanged(renderSetupPreview);
 
@@ -57,7 +79,7 @@ function handleStart() {
 
   if (rafId !== null) cancelAnimationFrame(rafId);
 
-  race = new Race(names);
+  race = new Race(names, currentThemeId);
   ui.showRace();
 
   lastTime = performance.now();

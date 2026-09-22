@@ -166,7 +166,7 @@ function drawBouncePad(body) {
 
 function drawBodies(bodies) {
   bodies.forEach((body) => {
-    if (body.label === 'spinner') return;
+    if (body.label === 'spinner' || body.label === 'windmillGate') return;
     if (body.label === 'bumper') return drawBumper(body);
     if (body.label === 'peg') return drawPeg(body);
     if (body.label === 'bouncePad') return drawBouncePad(body);
@@ -253,10 +253,32 @@ function drawSpinners(spinners) {
   });
 }
 
-function drawWindZones(windZones) {
-  windZones.forEach((zone) => {
-    ctx.fillStyle = COLORS.wind;
+function drawSlowZones(slowZones, dynamicZoom) {
+  slowZones.forEach((zone) => {
+    // A zone burns out after the first 2 marbles cross it (see race.js's
+    // applySlowZones) — drawn as a faint dead patch instead of the normal
+    // tint so it's obvious at a glance it no longer does anything.
+    ctx.fillStyle = zone.disabled ? 'rgba(255, 255, 255, 0.04)' : COLORS.slowZone;
     ctx.fillRect(0, zone.yStart, COURSE_WIDTH, zone.yEnd - zone.yStart);
+
+    // Labeled so it doesn't read as just a tinted stretch of tube — every
+    // marble drifts through the tint, but only whoever's currently 1st or
+    // 2nd actually feels the slow (see race.js's applySlowZones), and that
+    // distinction isn't visible from the tint alone.
+    const midY = (zone.yStart + zone.yEnd) / 2;
+    ctx.save();
+    ctx.translate(centerX(midY), midY);
+    ctx.scale(1 / dynamicZoom, 1 / dynamicZoom);
+    ctx.font = '700 13px "Baloo 2", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#05060f';
+    ctx.fillStyle = zone.disabled ? 'rgba(255, 255, 255, 0.35)' : COLORS.windVortex;
+    const label = zone.disabled ? '슬로우 구간 (무력화)' : '슬로우 구간';
+    ctx.strokeText(label, 0, 0);
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
   });
 }
 
@@ -273,20 +295,40 @@ function drawGoalLine() {
   ctx.setLineDash([]);
 }
 
-function drawMarbles(marbles, dynamicZoom) {
+function drawMarbles(marbles, dynamicZoom, slowedSet) {
   marbles.forEach((m) => {
     const pos = m.getPosition();
-    const radius = m.body.circleRadius;
+    const radius = m.radius; // per-marble stored radius — shape-agnostic (see entities/marble.js)
 
     ctx.globalAlpha = m.finished ? 0.4 : 1;
 
-    ctx.beginPath();
-    ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+    if (m.body.circleRadius) {
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+    } else {
+      // Non-circle marble (square/hexagon) — same pathVertices helper
+      // drawWall already uses for rotated polygons. body.vertices are
+      // always absolute world-space, already rotated/translated by Matter
+      // every step, so no extra ctx.rotate needed.
+      pathVertices(m.body);
+    }
     ctx.fillStyle = m.color;
     ctx.fill();
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = `hsl(${m.hue}, 70%, 30%)`;
     ctx.stroke();
+
+    // Marks exactly which marble(s) the slow zone is touching right now
+    // (only ever the live top 2, and only while they're actually inside
+    // one) — otherwise it's not visible from the marble itself that the
+    // zone's tint isn't a blanket effect on everyone passing through it.
+    if (slowedSet && slowedSet.has(m)) {
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, radius + 4, 0, Math.PI * 2);
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = COLORS.windVortex;
+      ctx.stroke();
+    }
 
     ctx.globalAlpha = 1;
 
@@ -315,13 +357,13 @@ export function render(race) {
   ctx.translate(-cam.x, -cam.y);
 
   drawCourseBackground();
-  drawWindZones(race.windZones);
+  drawSlowZones(race.slowZones, cam.dynamicZoom);
   drawMagnets(race.magnets, race.isMagnetRepelling());
   drawWindVortices(race.windVortices, race.isWindVortexBursting());
   drawBodies(race.walls);
   drawSpinners(race.spinners);
   drawGoalLine();
-  drawMarbles(race.marbles, cam.dynamicZoom);
+  drawMarbles(race.marbles, cam.dynamicZoom, race.currentlySlowed);
   particleManager.draw(ctx);
 
   ctx.restore();

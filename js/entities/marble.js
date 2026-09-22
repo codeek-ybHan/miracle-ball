@@ -1,13 +1,26 @@
 import * as physics from '../physics.js';
-import { MARBLE_RADIUS, MARBLE_RESTITUTION, MARBLE_FRICTION, MARBLE_FRICTION_AIR, JITTER_FORCE } from '../config.js';
+import {
+  MARBLE_RADIUS,
+  MARBLE_RESTITUTION,
+  MARBLE_FRICTION,
+  MARBLE_FRICTION_AIR,
+  JITTER_FORCE,
+  JITTER_TORQUE,
+} from '../config.js';
 
 export class Marble {
-  constructor(name, index, total, spawnCenterX, spawnHalfWidth) {
+  constructor(name, index, total, spawnCenterX, spawnHalfWidth, shape = 'circle') {
     this.name = name;
     this.hue = Math.round((index / Math.max(total, 1)) * 360);
     this.color = `hsl(${this.hue}, 85%, 60%)`;
     this.finished = false;
     this.rank = null;
+    // Circumradius of every marble shape (circle/square/hexagon) is always
+    // exactly MARBLE_RADIUS by construction (see physics.js's
+    // createMarbleBody) — stored once here so renderer.js can size the
+    // slow-zone ring / name-label offset shape-agnostically, since
+    // body.circleRadius is undefined for non-circle Matter bodies.
+    this.radius = MARBLE_RADIUS;
 
     const margin = 20 + MARBLE_RADIUS;
     const usableHalfWidth = Math.max(spawnHalfWidth - margin, 10);
@@ -25,9 +38,19 @@ export class Marble {
     const spawnX = spawnCenterX - usableHalfWidth + slot * usableWidth + (Math.random() * 2 - 1) * jitterRange;
     const spawnY = 10 + Math.random() * 60;
 
-    this.body = physics.createCircleBody(spawnX, spawnY, MARBLE_RADIUS, {
+    this.body = physics.createMarbleBody(shape, spawnX, spawnY, MARBLE_RADIUS, {
       restitution: MARBLE_RESTITUTION,
       friction: MARBLE_FRICTION,
+      // Matter.js defaults frictionStatic to 0.5 regardless of `friction`
+      // (the kinetic value), and it's what actually governs whether a
+      // slow/resting marble can start moving again — 0.5 needs a ~27deg
+      // slope just to break free from rest, so a marble that slows to a
+      // near-stop on any shallower static surface (the slalom planks, most
+      // of all) gets stuck dead until enough random jitter happens to nudge
+      // it loose, sometimes for tens of seconds. Matching it to the low
+      // kinetic value means a marble never has a fundamentally different
+      // threshold for "start sliding" vs. "keep sliding".
+      frictionStatic: MARBLE_FRICTION,
       frictionAir: MARBLE_FRICTION_AIR,
       label: 'marble',
       // Marbles never collide with each other (only with walls/obstacles):
@@ -48,5 +71,8 @@ export class Marble {
       x: (Math.random() - 0.5) * JITTER_FORCE,
       y: 0,
     });
+    // See config.js's JITTER_TORQUE — a no-op for a circle, but the only
+    // thing that can rotate a wedged square/hexagon marble loose.
+    physics.applyTorqueToBody(this.body, (Math.random() - 0.5) * JITTER_TORQUE);
   }
 }

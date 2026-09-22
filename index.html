@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MiuBall</title>
+  <title>MiracleBall</title>
+  <link rel="icon" type="image/png" href="assets/favicon.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
@@ -17,7 +18,7 @@
     <canvas id="game-canvas"></canvas>
 
     <section id="setup-screen">
-      <h1 id="title">MiuBall</h1>
+      <h1 id="title">MiracleBall</h1>
       <button id="start-btn" disabled>
         <img src="assets/start-logo.png" alt="시작" />
       </button>
@@ -26,7 +27,19 @@
       <button id="shuffle-btn" type="button">🔀 섞기</button>
       <div id="participant-count">참가자: 0명</div>
 
-      <p id="changelog">🔧 최근 수정사항 (2026-09-22): 바운스패드를 윈드 보텍스 바로 뒤로 이동 — 보텍스 중심좌표와 어긋나 있던 걸 맞춰서 모든 공이 패드에 맞도록 수정 (600마리 시뮬레이션 100% 통과)</p>
+      <div id="theme-selector">
+        <button class="theme-btn" data-theme="dark" type="button">
+          <span class="theme-swatch"></span>다크 스페이스
+        </button>
+        <button class="theme-btn" data-theme="neon" type="button">
+          <span class="theme-swatch"></span>네온 사이버
+        </button>
+        <button class="theme-btn" data-theme="pastel" type="button">
+          <span class="theme-swatch"></span>파스텔 캔디
+        </button>
+      </div>
+
+      <p id="changelog">🔧 최근 수정사항 (2026-09-22): 서비스 이름 MiuBall → MiracleBall로 변경, 웹 아이콘(파비콘) 적용</p>
     </section>
 
     <section id="race-screen" class="hidden">

@@ -19,11 +19,14 @@ import {
   WIND_VORTEX_BURST_MS,
   BOUNCE_PAD_FLASH_MS,
   BOUNCE_PAD_LAUNCH_SPEED,
+  WINDMILL_GATE_MAX_ANGULAR_SPEED,
+  SLOW_ZONE_MAX_SPEED,
   WALL_PUSH_MARGIN,
   WALL_PUSH_FORCE,
   MARBLE_RADIUS,
   MARBLE_MAX_SPEED,
   COLORS,
+  getThemeShape,
 } from './config.js';
 
 function shuffle(array) {
@@ -36,25 +39,32 @@ function shuffle(array) {
 }
 
 export class Race {
-  constructor(names) {
+  constructor(names, themeId = 'dark') {
     physics.initPhysics();
     camera.configureBaseZoom();
 
-    const course = map.createCourse();
+    const course = map.createCourse(themeId);
     this.walls = course.bodies;
     this.spinners = course.spinners;
-    this.windZones = course.windZones;
+    // passedMarbles/disabled aren't part of the course data itself — they're
+    // per-race state tracking how many marbles have fully crossed each zone
+    // (see applySlowZones), so a zone burns out after the first 2 balls go
+    // through it instead of punishing every leader for the whole race.
+    this.slowZones = course.slowZones.map((zone) => ({ ...zone, passedMarbles: new Set(), disabled: false }));
     this.magnets = course.magnets;
     this.magnetClock = 0;
     this.windVortices = course.windVortices;
     this.vortexClock = 0;
+    this.currentlySlowed = new Set();
+    this.windmillGate = this.walls.find((b) => b.label === 'windmillGate');
     physics.addBodies(this.walls);
 
     const spawnCenterX = map.centerX(30);
     const spawnHalfWidth = map.tubeHalfWidthAt(30);
+    const shape = getThemeShape(themeId);
     const order = shuffle(names);
     this.marbles = order.map(
-      (name, i) => new Marble(name, i, order.length, spawnCenterX, spawnHalfWidth)
+      (name, i) => new Marble(name, i, order.length, spawnCenterX, spawnHalfWidth, shape)
     );
     physics.addBodies(this.marbles.map((m) => m.body));
 
@@ -79,14 +89,36 @@ export class Race {
         } else if (other.label === 'spinner') {
           const marbleBody = bodyA.label === 'marble' ? bodyA : bodyB;
           particleManager.spawnSpark(marbleBody.position.x, marbleBody.position.y, COLORS.spinner, 10);
+        } else if (other.label === 'windmillGate') {
+          // Rigid and immovable until this exact moment — the first marble
+          // to ever touch it is what wakes it up into a real dynamic body
+          // (see map.js's createCourse for why), so the collision that
+          // triggers this is also the collision that starts tipping it.
+          if (!other.plugin.activated) {
+            other.plugin.activated = true;
+            physics.setBodyStatic(other, false);
+            particleManager.spawnSpark(other.position.x, other.position.y, COLORS.windmill, 14);
+          }
         } else if (other.label === 'bouncePad') {
           // A direct velocity kick, not restitution, is what actually sends
           // the marble flying (see config.js's BOUNCE_PAD_LAUNCH_SPEED for
-          // why) — most of its existing sideways drift carries through, plus
-          // a small random nudge, so the launch keeps some personality
-          // instead of firing dead straight up every time.
+          // why). The sideways component needs to be strong and random-
+          // signed, not just a fraction of incoming drift — the wind vortex
+          // right above centers every marble before it ever reaches the pad,
+          // so incoming vx here is nearly always tiny (~0-2px/frame), and a
+          // weak kick just sends the marble straight back down onto the same
+          // spot it launched from. Measured in practice: a full flight
+          // (launch to landing) takes ~80 frames, and the pad is only
+          // ~155px wide, so anything under ~1.2px/frame of sideways drift
+          // reliably re-lands ON the pad — re-triggering the launch and
+          // repeating, sometimes several times in a row, which is what was
+          // blowing up the rank spread through this section. A forced
+          // 3-6px/frame push in a random direction clears the pad's width
+          // several times over within that flight time, so a marble escapes
+          // on the first bounce essentially every time.
           const marbleBody = bodyA.label === 'marble' ? bodyA : bodyB;
-          const spread = marbleBody.velocity.x * 0.5 + (Math.random() - 0.5) * 4;
+          const pushDir = Math.random() < 0.5 ? -1 : 1;
+          const spread = marbleBody.velocity.x * 0.3 + pushDir * (3 + Math.random() * 3);
           physics.setBodyVelocity(marbleBody, { x: spread, y: -BOUNCE_PAD_LAUNCH_SPEED });
           other.plugin.flashUntil = performance.now() + BOUNCE_PAD_FLASH_MS;
           // Drives the sink-then-spring mat animation in renderer.js — purely
@@ -105,11 +137,15 @@ export class Race {
     this.marbles.forEach((m) => {
       if (m.finished) return;
       m.jitter();
-      this.applyWindZones(m);
       this.applyMagnets(m);
       this.applyWindVortices(m);
       this.applyWallPush(m);
     });
+    // Live 1st/2nd place, recomputed fresh every frame (not cached from the
+    // last rank-panel update) — applySlowZones needs to know exactly who's
+    // out front *right now*, since the whole point is that it only ever
+    // pushes back on whoever that is at this instant, not on everyone.
+    this.applySlowZones(this.getUnfinishedRanking().slice(0, 2));
     // Matter's collision check is discrete: it only looks at where a body
     // ends up after a step, never the path it swept to get there. The speed
     // cap below assumes a ~16.7ms (60fps) step, but main.js's rAF loop can
@@ -164,14 +200,78 @@ export class Race {
         physics.setBodyVelocity(m.body, { x: v.x * scale, y: v.y * scale });
       }
     });
+    if (this.windmillGate && !this.windmillGate.isStatic) {
+      // Re-pin the center every step instead of trusting a Matter.Constraint
+      // for this (see map.js's createCourse for why that turned out to be
+      // unreliable under continuous rotation) — zeroing only the LINEAR
+      // velocity and resetting position back to the pivot, while leaving
+      // angularVelocity alone, is what keeps it purely rotating in place
+      // like a real seesaw instead of also falling.
+      physics.setBodyPosition(this.windmillGate, this.windmillGate.plugin.pivot);
+      physics.setBodyVelocity(this.windmillGate, { x: 0, y: 0 });
+      // See config.js's WINDMILL_GATE_MAX_ANGULAR_SPEED.
+      if (Math.abs(this.windmillGate.angularVelocity) > WINDMILL_GATE_MAX_ANGULAR_SPEED) {
+        const sign = Math.sign(this.windmillGate.angularVelocity);
+        physics.setBodyAngularVelocity(this.windmillGate, sign * WINDMILL_GATE_MAX_ANGULAR_SPEED);
+      }
+    }
   }
 
-  applyWindZones(marble) {
-    const y = marble.body.position.y;
-    this.windZones.forEach((zone) => {
-      if (y >= zone.yStart && y <= zone.yEnd) {
-        physics.applyForceToBody(marble.body, { x: 0, y: zone.forceY });
-      }
+  // Unlike every other force zone here, this only ever touches the marbles
+  // it's handed — the caller decides who that is (the live top 2), so the
+  // rubber-band is a property of *rank*, not of merely passing through a
+  // patch of the course the way the old blanket updraft was.
+  //
+  // This clamps velocity directly instead of applying a force. A force
+  // strong enough to feel dramatic can — depending on how fast the marble
+  // happened to be going when it entered — momentarily overpower gravity
+  // and reverse it, and that turned out to be a real trap: normally a
+  // stalled leader gets overtaken and drops out of the top 2, lifting the
+  // effect, but that escape doesn't exist once a marble is the only one
+  // left racing, or when several marbles hovering together keep trading the
+  // "leader" penalty back and forth fast enough that no single one is ever
+  // continuously slowed long enough for a timeout to save it — several
+  // guarded designs along those lines still produced races that took
+  // minutes or never finished. Clamping the fall speed down to
+  // SLOW_ZONE_MAX_SPEED instead has no such failure mode: velocity only
+  // ever gets pulled down toward that cap, never pushed negative, so
+  // crossing the zone is always bounded (zone length / cap, at worst) no
+  // matter how slow a marble was already going when it arrived.
+  applySlowZones(leaders) {
+    // Each zone only gets to slow the first 2 marbles that ever cross it —
+    // once a marble has fully passed (cleared yEnd, regardless of whether it
+    // was actually a leader while inside), it's counted, and after 2 the
+    // zone permanently stops clamping anyone. Tracked across ALL marbles
+    // (not just leaders) since "passed through" is about the ball's
+    // position, not whether the slow applied to it.
+    this.marbles.forEach((marble) => {
+      if (marble.finished) return;
+      this.slowZones.forEach((zone) => {
+        if (zone.disabled) return;
+        if (marble.body.position.y > zone.yEnd && !zone.passedMarbles.has(marble)) {
+          zone.passedMarbles.add(marble);
+          if (zone.passedMarbles.size >= 2) zone.disabled = true;
+        }
+      });
+    });
+
+    // Who's actually being clamped this frame — not just "is a leader", but
+    // "is a leader AND currently inside a zone" — so the renderer can draw
+    // an unmistakable visual on exactly the marble(s) the slow is touching,
+    // instead of leaving it to look like the whole tinted zone affects
+    // whoever drifts through it.
+    this.currentlySlowed = new Set();
+    leaders.forEach((marble) => {
+      this.slowZones.forEach((zone) => {
+        if (zone.disabled) return;
+        const y = marble.body.position.y;
+        if (y < zone.yStart || y > zone.yEnd) return;
+        const v = marble.body.velocity;
+        if (v.y > SLOW_ZONE_MAX_SPEED) {
+          physics.setBodyVelocity(marble.body, { x: v.x, y: SLOW_ZONE_MAX_SPEED });
+        }
+        this.currentlySlowed.add(marble);
+      });
     });
   }
 

@@ -114,6 +114,64 @@ body {
   color: #9aa3d1;
 }
 
+#theme-selector {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  max-width: 300px;
+}
+
+.theme-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 8px 4px;
+  font-family: 'Nunito', sans-serif;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 2px solid #3a4270;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: #9aa3d1;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.theme-btn:hover {
+  border-color: #5ee0ff;
+  color: #f4f6ff;
+  transform: translateY(-1px);
+}
+
+.theme-btn.selected {
+  border-color: #5ee0ff;
+  color: #5ee0ff;
+  background: rgba(94, 224, 255, 0.1);
+  box-shadow: 0 0 10px rgba(94, 224, 255, 0.4);
+}
+
+.theme-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.theme-btn[data-theme='dark'] .theme-swatch {
+  background: #5ee0ff;
+}
+
+.theme-btn[data-theme='neon'] .theme-swatch {
+  background: #ff00c8;
+}
+
+.theme-btn[data-theme='pastel'] .theme-swatch {
+  background: #ffb6c1;
+}
+
 /* Dev/verification aid: lets whoever's looking at the page confirm they're
    on a server that actually has the latest change, without needing to dig
    through devtools or ask. Only ever holds the single most recent change —

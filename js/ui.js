@@ -1,5 +1,5 @@
 let setupScreen, raceScreen;
-let nameInput, participantCount, startBtn, shuffleBtn;
+let nameInput, participantCount, startBtn, shuffleBtn, themeButtons;
 let rankPanel, rankList, finalOverlay, finalRankList, restartBtn, gameCanvas;
 
 export function initUI() {
@@ -10,6 +10,7 @@ export function initUI() {
   participantCount = document.getElementById('participant-count');
   startBtn = document.getElementById('start-btn');
   shuffleBtn = document.getElementById('shuffle-btn');
+  themeButtons = document.querySelectorAll('.theme-btn');
 
   rankPanel = document.getElementById('rank-panel');
   rankList = document.getElementById('rank-list');
@@ -89,6 +90,18 @@ function shuffleNames() {
 
 export function bindShuffleButton() {
   shuffleBtn.addEventListener('click', shuffleNames);
+}
+
+export function bindThemeButtons(handler) {
+  themeButtons.forEach((btn) => {
+    btn.addEventListener('click', () => handler(btn.dataset.theme));
+  });
+}
+
+export function setSelectedTheme(themeId) {
+  themeButtons.forEach((btn) => {
+    btn.classList.toggle('selected', btn.dataset.theme === themeId);
+  });
 }
 
 export function bindStartButton(handler) {
