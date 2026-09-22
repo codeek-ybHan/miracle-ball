@@ -11,7 +11,18 @@ export class Marble {
 
     const margin = 20 + MARBLE_RADIUS;
     const usableHalfWidth = Math.max(spawnHalfWidth - margin, 10);
-    const spawnX = spawnCenterX + (Math.random() * 2 - 1) * usableHalfWidth;
+    const usableWidth = usableHalfWidth * 2;
+    // Evenly spaced starting lanes across the tube's width (with a little
+    // per-marble jitter so it doesn't look like a rigid grid) instead of
+    // fully random X. Random placement could land several marbles right on
+    // top of each other by pure chance, especially near the center — and a
+    // tight cluster falling with almost no separation tends to thread the
+    // exact same gap through every peg row together, so they'd stay bunched
+    // the whole way down and cross the finish as a practically untouched
+    // pack instead of getting split up by the course.
+    const slot = total > 1 ? (index + 0.5) / total : 0.5;
+    const jitterRange = (usableWidth / Math.max(total, 1)) * 0.4;
+    const spawnX = spawnCenterX - usableHalfWidth + slot * usableWidth + (Math.random() * 2 - 1) * jitterRange;
     const spawnY = 10 + Math.random() * 60;
 
     this.body = physics.createCircleBody(spawnX, spawnY, MARBLE_RADIUS, {

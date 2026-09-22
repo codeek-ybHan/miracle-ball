@@ -1,5 +1,5 @@
 let setupScreen, raceScreen;
-let nameInput, participantCount, startBtn;
+let nameInput, participantCount, startBtn, shuffleBtn;
 let rankPanel, rankList, finalOverlay, finalRankList, restartBtn, gameCanvas;
 
 export function initUI() {
@@ -9,6 +9,7 @@ export function initUI() {
   nameInput = document.getElementById('name-input');
   participantCount = document.getElementById('participant-count');
   startBtn = document.getElementById('start-btn');
+  shuffleBtn = document.getElementById('shuffle-btn');
 
   rankPanel = document.getElementById('rank-panel');
   rankList = document.getElementById('rank-list');
@@ -25,14 +26,69 @@ export function parseNames() {
     .filter((s) => s.length > 0);
 }
 
+let namesChangedHandler = null;
+
 export function refreshParticipantCount() {
   const count = parseNames().length;
   participantCount.textContent = `참가자: ${count}명`;
   startBtn.disabled = count < 2;
+  if (namesChangedHandler) namesChangedHandler();
 }
 
 export function bindNameInput() {
   nameInput.addEventListener('input', refreshParticipantCount);
+}
+
+// Fires whenever the name list could have changed — both from the user
+// typing (via refreshParticipantCount, above) and from the shuffle
+// animation's programmatic rewrites (which also call refreshParticipantCount
+// each frame), so main.js can keep the setup-screen course preview in sync
+// with whatever's actually in the textarea right now.
+export function onNamesChanged(handler) {
+  namesChangedHandler = handler;
+}
+
+function shuffleArray(array) {
+  const result = [...array];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+// Merges duplicate names into one line tagged "*N" before shuffling, so
+// pasting a raw list that mentions the same person multiple times doesn't
+// silently spawn them as separate racers — the count stays visible instead.
+// The reorder plays out as a quick flicker of intermediate shuffles (rather
+// than snapping straight to the final order) so pressing the button reads as
+// "shuffling right now" instead of an instant, easy-to-miss swap.
+const SHUFFLE_FRAMES = 10;
+const SHUFFLE_FRAME_MS = 70;
+
+function shuffleNames() {
+  const counts = new Map();
+  parseNames().forEach((name) => counts.set(name, (counts.get(name) || 0) + 1));
+  const merged = [...counts.entries()].map(([name, count]) => (count > 1 ? `${name}*${count}` : name));
+  if (merged.length === 0) return;
+
+  shuffleBtn.disabled = true;
+  let frame = 0;
+  const tick = () => {
+    nameInput.value = shuffleArray(merged).join('\n');
+    refreshParticipantCount();
+    frame++;
+    if (frame < SHUFFLE_FRAMES) {
+      setTimeout(tick, SHUFFLE_FRAME_MS);
+    } else {
+      shuffleBtn.disabled = false;
+    }
+  };
+  tick();
+}
+
+export function bindShuffleButton() {
+  shuffleBtn.addEventListener('click', shuffleNames);
 }
 
 export function bindStartButton(handler) {
@@ -46,6 +102,7 @@ export function bindRestartButton(handler) {
 export function showSetup() {
   setupScreen.classList.remove('hidden');
   raceScreen.classList.add('hidden');
+  gameCanvas.classList.add('preview-dim');
   refreshParticipantCount();
 }
 
@@ -55,6 +112,7 @@ export function showRace() {
   finalOverlay.classList.add('hidden');
   finalRankList.innerHTML = '';
   restartBtn.classList.add('hidden');
+  gameCanvas.classList.remove('preview-dim');
   gameCanvas.classList.remove('dimmed');
   rankPanel.classList.remove('dimmed');
 }

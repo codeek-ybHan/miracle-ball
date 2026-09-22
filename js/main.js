@@ -3,13 +3,20 @@ import * as renderer from './renderer.js';
 import * as ui from './ui.js';
 import * as viewport from './viewport.js';
 
+let race = null;
+let lastTime = 0;
+let rafId = null;
+
 ui.initUI();
 ui.bindNameInput();
+ui.bindShuffleButton();
 ui.bindStartButton(handleStart);
 ui.bindRestartButton(() => {
   if (rafId !== null) cancelAnimationFrame(rafId);
   rafId = null;
+  race = null;
   ui.showSetup();
+  renderSetupPreview();
 });
 ui.showSetup();
 
@@ -25,13 +32,24 @@ function resizeCanvas() {
   canvas.width = w;
   canvas.height = h;
   viewport.setViewportSize(w, h);
+  if (!race) renderSetupPreview();
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
-let race = null;
-let lastTime = 0;
-let rafId = null;
+// Before the race actually starts, the canvas keeps rendering behind the
+// (now translucent) setup screen instead of sitting blank — a snapshot of
+// the real course with marbles resting exactly at their starting spawn
+// positions. It's a fresh Race that's built but never stepped (physics.step
+// never runs on it here), so marbles stay put instead of falling; typing a
+// new name list or resizing the window just rebuilds and redraws that same
+// static snapshot.
+function renderSetupPreview() {
+  const names = ui.parseNames();
+  const previewNames = names.length > 0 ? names : ['1', '2', '3'];
+  renderer.render(new Race(previewNames));
+}
+ui.onNamesChanged(renderSetupPreview);
 
 function handleStart() {
   const names = ui.parseNames();

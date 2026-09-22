@@ -9,6 +9,12 @@ import {
   PEG_BOUNCE_MS,
   PEG_BOUNCE_SCALE,
   MAGNET_RADIUS,
+  WIND_VORTEX_RADIUS,
+  BOUNCE_PAD_SINK_MS,
+  BOUNCE_PAD_SINK_DEPTH,
+  BOUNCE_PAD_SPRING_MS,
+  BOUNCE_PAD_SPRING_HEIGHT,
+  BOUNCE_PAD_SETTLE_MS,
   COLORS,
 } from './config.js';
 
@@ -95,12 +101,86 @@ function drawTrampoline(body) {
   ctx.stroke();
 }
 
+const BOUNCE_PAD_ANIM_MS = BOUNCE_PAD_SINK_MS + BOUNCE_PAD_SPRING_MS + BOUNCE_PAD_SETTLE_MS;
+
+// Positive = the mat's center dipping down (sinking under a landing
+// marble's "weight"); negative = springing up past neutral. Three eased
+// phases chained back to back: sink down, spring up past neutral (bigger
+// than the dip, for a real overshoot), then ease back to flat.
+function bouncePadDeflection(elapsedMs) {
+  if (elapsedMs < BOUNCE_PAD_SINK_MS) {
+    const t = elapsedMs / BOUNCE_PAD_SINK_MS;
+    return BOUNCE_PAD_SINK_DEPTH * Math.sin((t * Math.PI) / 2);
+  }
+  const afterSink = elapsedMs - BOUNCE_PAD_SINK_MS;
+  if (afterSink < BOUNCE_PAD_SPRING_MS) {
+    const t = afterSink / BOUNCE_PAD_SPRING_MS;
+    const eased = 0.5 - 0.5 * Math.cos(t * Math.PI);
+    return BOUNCE_PAD_SINK_DEPTH + (-BOUNCE_PAD_SPRING_HEIGHT - BOUNCE_PAD_SINK_DEPTH) * eased;
+  }
+  const afterSpring = afterSink - BOUNCE_PAD_SPRING_MS;
+  const t = afterSpring / BOUNCE_PAD_SETTLE_MS;
+  const eased = 0.5 - 0.5 * Math.cos(Math.min(t, 1) * Math.PI);
+  return -BOUNCE_PAD_SPRING_HEIGHT * (1 - eased);
+}
+
+// A small permanent upward bow even at rest, so it reads as a taut,
+// springy mat on sight instead of looking like a plain flat bar right up
+// until the first hit.
+const BOUNCE_PAD_REST_ARC = -5;
+
+// Drawn as a flexing mat (curved top/bottom edges pinned at two end posts,
+// like a real trampoline pinned to its frame) instead of the plain static
+// rectangle the physics body actually is — the body itself never changes
+// shape, this is purely a skin on top of it.
+function drawBouncePad(body) {
+  const { x, y } = body.position;
+  const halfWidth = (body.bounds.max.x - body.bounds.min.x) / 2;
+  const halfThickness = (body.bounds.max.y - body.bounds.min.y) / 2;
+  const elapsed = performance.now() - body.plugin.hitAt;
+  const deflection = BOUNCE_PAD_REST_ARC + (elapsed < BOUNCE_PAD_ANIM_MS ? bouncePadDeflection(elapsed) : 0);
+  const lit = performance.now() < body.plugin.flashUntil;
+
+  const leftX = x - halfWidth;
+  const rightX = x + halfWidth;
+  const topY = y - halfThickness;
+  const bottomY = y + halfThickness;
+  // *2 because a quadratic curve's own midpoint only reaches halfway to its
+  // control point, so this keeps the mat's visible peak matching the
+  // config constants' actual px values instead of being half as tall.
+  const controlTopY = topY + deflection * 2;
+  const controlBottomY = bottomY + deflection * 2;
+
+  ctx.beginPath();
+  ctx.moveTo(leftX, topY);
+  ctx.quadraticCurveTo(x, controlTopY, rightX, topY);
+  ctx.lineTo(rightX, bottomY);
+  ctx.quadraticCurveTo(x, controlBottomY, leftX, bottomY);
+  ctx.closePath();
+  ctx.fillStyle = lit ? COLORS.bouncePadFlash : COLORS.bouncePad;
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = COLORS.bouncePadEdge;
+  ctx.stroke();
+
+  // End posts, anchoring the mat to something — otherwise a lone curved
+  // shape floating in the tube doesn't read as "pinned down and springy".
+  const postRadius = halfThickness * 0.9;
+  ctx.fillStyle = COLORS.bouncePadEdge;
+  [leftX, rightX].forEach((postX) => {
+    ctx.beginPath();
+    ctx.arc(postX, y, postRadius, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
 function drawBodies(bodies) {
   bodies.forEach((body) => {
     if (body.label === 'spinner') return;
     if (body.label === 'bumper') return drawBumper(body);
     if (body.label === 'peg') return drawPeg(body);
     if (body.label === 'trampoline') return drawTrampoline(body);
+    if (body.label === 'bouncePad') return drawBouncePad(body);
     drawWall(body);
   });
 }
@@ -124,6 +204,47 @@ function drawMagnets(magnets, repelling) {
     ctx.beginPath();
     ctx.arc(magnet.x, magnet.y, 6, 0, Math.PI * 2);
     ctx.fillStyle = COLORS.magnetCore;
+    ctx.fill();
+  });
+}
+
+// Three rotating arcs read as a spinning pinwheel/whirlwind — spins slowly
+// while pulling marbles in, then snaps to spin the other way (and faster)
+// during the burst, so the direction reversal itself telegraphs "now it's
+// pushing out" independent of the color change.
+function drawWindVortices(vortices, bursting) {
+  const rotation = (performance.now() / 1000) * (bursting ? -5 : 1.6);
+  const color = bursting ? COLORS.windVortexBurst : COLORS.windVortex;
+  vortices.forEach((vortex) => {
+    // Faint outer ring showing the actual pull/burst radius, same idea as
+    // the magnet's breathing ring.
+    ctx.beginPath();
+    ctx.arc(vortex.x, vortex.y, WIND_VORTEX_RADIUS, 0, Math.PI * 2);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = 0.12;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    for (let i = 0; i < 3; i++) {
+      const r = 18 + i * 16;
+      const startAngle = rotation + (i * Math.PI * 2) / 3;
+      ctx.beginPath();
+      ctx.arc(vortex.x, vortex.y, r, startAngle, startAngle + Math.PI * 0.55);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.globalAlpha = 0.45;
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.beginPath();
+    ctx.arc(vortex.x, vortex.y, 9, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(vortex.x, vortex.y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = COLORS.windVortexCore;
     ctx.fill();
   });
 }
@@ -207,6 +328,7 @@ export function render(race) {
   drawCourseBackground();
   drawWindZones(race.windZones);
   drawMagnets(race.magnets, race.isMagnetRepelling());
+  drawWindVortices(race.windVortices, race.isWindVortexBursting());
   drawBodies(race.walls);
   drawSpinners(race.spinners);
   drawGoalLine();

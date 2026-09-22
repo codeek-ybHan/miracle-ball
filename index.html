@@ -14,6 +14,8 @@
 </head>
 <body>
   <div id="app">
+    <canvas id="game-canvas"></canvas>
+
     <section id="setup-screen">
       <h1 id="title">MiuBall</h1>
       <button id="start-btn" disabled>
@@ -21,12 +23,11 @@
       </button>
       <p class="hint">참가자 이름을 한 줄에 한 명씩 입력하세요 (최소 2명)</p>
       <textarea id="name-input" rows="4" placeholder="예)&#10;철수&#10;영희&#10;민수"></textarea>
+      <button id="shuffle-btn" type="button">🔀 섞기</button>
       <div id="participant-count">참가자: 0명</div>
     </section>
 
     <section id="race-screen" class="hidden">
-      <canvas id="game-canvas"></canvas>
-
       <aside id="rank-panel">
         <h3>실시간 순위</h3>
         <ol id="rank-list"></ol>

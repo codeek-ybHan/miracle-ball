@@ -26,10 +26,15 @@ body {
   display: none !important;
 }
 
-/* Setup screen */
+/* Setup screen — sits over the canvas (now a full-screen base layer behind
+   everything, see canvas#game-canvas below) with no backdrop of its own; the
+   canvas underneath dims itself instead (see canvas#game-canvas.preview-dim
+   below) so the panel's own text and logo stay fully crisp while the course
+   preview behind them fades back. */
 #setup-screen {
   position: absolute;
   inset: 0;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -73,6 +78,35 @@ body {
 #name-input:focus {
   outline: none;
   border-color: #5ee0ff;
+}
+
+#shuffle-btn {
+  width: 100%;
+  max-width: 300px;
+  padding: 14px 20px;
+  font-family: 'Baloo 2', sans-serif;
+  font-size: 17px;
+  font-weight: 700;
+  border: 2px solid #5ee0ff;
+  border-radius: 999px;
+  background: rgba(94, 224, 255, 0.1);
+  color: #5ee0ff;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+#shuffle-btn:hover:not(:disabled) {
+  background: rgba(94, 224, 255, 0.22);
+  transform: translateY(-2px);
+}
+
+#shuffle-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+#shuffle-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 #participant-count {
@@ -133,20 +167,33 @@ body {
   cursor: not-allowed;
 }
 
-/* Race screen: canvas fills the whole viewport, rank panel floats on top */
+/* Race screen: no longer wraps the canvas (it's a shared full-screen base
+   layer now, see canvas#game-canvas below) — just the rank panel and
+   final-ranking overlay floating on top of it. */
 #race-screen {
   position: absolute;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #05060f;
+  z-index: 1;
 }
 
+/* Full-screen base layer behind both the setup and race screens, so the
+   same live course rendering shows through behind the setup screen before a
+   race even starts. */
 canvas#game-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
   background: #12183f;
   display: block;
   transition: opacity 0.4s ease;
+}
+
+/* Applied only while the setup screen is showing (see ui.js's
+   showSetup/showRace) — the live course preview fades into the background
+   instead of competing with the name-entry panel, then snaps back to full
+   opacity the instant the race actually starts. */
+canvas#game-canvas.preview-dim {
+  opacity: 0.35;
 }
 
 /* Once the first marble finishes, the still-running race becomes a dimmed

@@ -3,8 +3,11 @@ export const COURSE_WIDTH = 980;
 // uniformly, so the race takes longer to watch without changing any of the
 // tested obstacle shapes/angles/gaps — only how far apart they sit.
 export const S = 1.4;
-export const COURSE_HEIGHT = 4200 * S + 126 + 182; // clears the final funnel + floor, whatever S is
-export const GOAL_Y = 4200 * S + 126;
+// 4350 must match the final funnel's y in map.js's createCourse() (section
+// 12) — it's not derived from there automatically, so moving that funnel
+// means updating both these lines too.
+export const COURSE_HEIGHT = 4350 * S + 126 + 182; // clears the final funnel + floor, whatever S is
+export const GOAL_Y = 4350 * S + 126;
 // Fraction of the actual window height where the followed marble is anchored
 // vertically (the canvas itself is resized to the real window on every
 // resize, like lazygyu/roulette's ResizeObserver-driven canvas, instead of a
@@ -46,14 +49,20 @@ export const MARBLE_MAX_SPEED = 14;
 // Small continuous random sideways nudge so marbles on near-identical paths
 // still diverge over a long fall (also breaks perfectly symmetric traps).
 export const JITTER_FORCE = 0.00018;
+// Keeps a marble from riding a long, flat stretch along the curved tube
+// wall — the closer it gets to either wall, the harder it gets nudged back
+// toward the centerline, growing from nothing at WALL_PUSH_MARGIN away
+// down to full strength right at the wall.
+export const WALL_PUSH_MARGIN = 26; // px of clearance from the wall where the push starts
+export const WALL_PUSH_FORCE = 0.0004;
 
-export const PEG_RADIUS = 11;
+export const PEG_RADIUS = 15;
 export const PEG_BOUNCE_MS = 180;
 export const PEG_BOUNCE_SCALE = 1.7;
 
-export const SPINNER_SPEED = 1.1; // rad/sec
-export const SPINNER_LENGTH = 280;
-export const WINDMILL_SPEED = 0.7; // rad/sec
+export const SPINNER_SPEED = 0.7; // rad/sec
+export const SPINNER_LENGTH = 340;
+export const WINDMILL_SPEED = 0.45; // rad/sec
 export const WINDMILL_LENGTH = 380;
 
 export const BUMPER_RADIUS = 22;
@@ -96,6 +105,40 @@ export const TRAMPOLINE_MAX_WAIT_MS = 4000;
 // launch isn't a loophole around the per-frame speed cap.
 export const TRAMPOLINE_LAUNCH_SPEED = 14;
 
+// Bounce pad: the opposite design from the trampoline above — it fires
+// instantly on every single touch instead of waiting for a group to gather.
+// A first attempt at this just cranked up restitution and left it at that,
+// but that leans on Matter's collision solver to stay springy over repeated
+// bounces, and in practice each bounce comes back a little weaker than the
+// last (same energy-loss problem the trampoline's own launch sidesteps —
+// see TRAMPOLINE_LAUNCH_SPEED below) until the marble is just resting on the
+// pad, the opposite of the dramatic launch this is supposed to be. So this
+// uses the same fix: restitution here is just a modest cushion, and the
+// real launch (see race.js's collision handler) is a direct velocity kick,
+// guaranteed to send the marble flying every time regardless of how much
+// speed it arrived with.
+export const BOUNCE_PAD_THICKNESS = 18;
+export const BOUNCE_PAD_MARGIN = 100; // kept clear of each tube wall
+export const BOUNCE_PAD_RESTITUTION = 0.8;
+export const BOUNCE_PAD_FRICTION = 0.05;
+export const BOUNCE_PAD_FLASH_MS = 160;
+// Kept at MARBLE_MAX_SPEED, same reasoning as TRAMPOLINE_LAUNCH_SPEED: the
+// launch is a guaranteed full-height pop, not a loophole around the
+// per-frame speed cap every marble is already held to everywhere else.
+export const BOUNCE_PAD_LAUNCH_SPEED = 14;
+
+// Purely visual: the mat itself is drawn as a curved shape (not the raw
+// rigid rectangle body) that plays a real trampoline's sink-then-spring
+// motion after a hit — dips down under the "weight" of the landing, springs
+// back up past neutral (bigger than the dip, for a satisfying overshoot),
+// then settles back flat. None of this feeds back into the physics body,
+// which stays a plain static rectangle throughout.
+export const BOUNCE_PAD_SINK_MS = 90;
+export const BOUNCE_PAD_SINK_DEPTH = 20; // px the mat's center dips down
+export const BOUNCE_PAD_SPRING_MS = 200;
+export const BOUNCE_PAD_SPRING_HEIGHT = 32; // px the mat's center springs up past neutral
+export const BOUNCE_PAD_SETTLE_MS = 260;
+
 // Magnet: not a solid body — a force zone that cycles between pulling
 // nearby marbles in (most of the cycle) and shoving them back out (a short
 // burst), so marbles passing through get scattered rather than parked.
@@ -107,6 +150,18 @@ export const MAGNET_ATTRACT_FORCE = 0.0002;
 export const MAGNET_REPEL_FORCE = 0.0007;
 export const MAGNET_CYCLE_MS = 1600;
 export const MAGNET_REPEL_MS = 350;
+
+// Wind vortex: also not a solid body, and cycles pull-in/burst-out the same
+// way the magnet does, but adds a tangential (sideways) force on top of the
+// radial pull during the "sucking in" phase — that's what makes it read as
+// a swirling whirlwind circling marbles toward its center instead of a
+// magnet's straight-line pull.
+export const WIND_VORTEX_RADIUS = 170;
+export const WIND_VORTEX_PULL_FORCE = 0.00022;
+export const WIND_VORTEX_SWIRL_FORCE = 0.00022;
+export const WIND_VORTEX_BURST_FORCE = 0.0008;
+export const WIND_VORTEX_CYCLE_MS = 1900;
+export const WIND_VORTEX_BURST_MS = 320;
 
 // Kept weaker than gravity (scaled with it) so marbles are slowed, never levitated.
 export const WIND_FORCE_Y = -0.000144;
@@ -140,10 +195,16 @@ export const COLORS = {
   trampoline: '#caff70',
   trampolineEdge: '#eaffc2',
   trampolineFlash: '#ffffff',
+  bouncePad: '#ffd93d',
+  bouncePadEdge: '#fff2b8',
+  bouncePadFlash: '#ffffff',
   magnet: '#b892ff',
   magnetCore: '#e8dbff',
   magnetRepel: '#ff6b6b',
   wind: 'rgba(94, 224, 255, 0.09)',
+  windVortex: '#5ee0ff',
+  windVortexCore: '#e0faff',
+  windVortexBurst: '#ffffff',
   goalLine: '#5ee0ff',
   spark: '#ffe066',
   text: '#f4f6ff',

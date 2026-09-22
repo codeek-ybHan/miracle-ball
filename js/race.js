@@ -11,12 +11,22 @@ import {
   MAGNET_REPEL_FORCE,
   MAGNET_CYCLE_MS,
   MAGNET_REPEL_MS,
+  WIND_VORTEX_RADIUS,
+  WIND_VORTEX_PULL_FORCE,
+  WIND_VORTEX_SWIRL_FORCE,
+  WIND_VORTEX_BURST_FORCE,
+  WIND_VORTEX_CYCLE_MS,
+  WIND_VORTEX_BURST_MS,
   TRAMPOLINE_WIDTH,
   TRAMPOLINE_THICKNESS,
   TRAMPOLINE_TRIGGER_RATIO,
   TRAMPOLINE_TRIGGER_MIN,
   TRAMPOLINE_MAX_WAIT_MS,
   TRAMPOLINE_LAUNCH_SPEED,
+  BOUNCE_PAD_FLASH_MS,
+  BOUNCE_PAD_LAUNCH_SPEED,
+  WALL_PUSH_MARGIN,
+  WALL_PUSH_FORCE,
   MARBLE_RADIUS,
   MARBLE_MAX_SPEED,
   COLORS,
@@ -42,6 +52,8 @@ export class Race {
     this.windZones = course.windZones;
     this.magnets = course.magnets;
     this.magnetClock = 0;
+    this.windVortices = course.windVortices;
+    this.vortexClock = 0;
     physics.addBodies(this.walls);
 
     const spawnCenterX = map.centerX(30);
@@ -78,6 +90,20 @@ export class Race {
           // decided in checkTrampolines() once enough racers are resting.
           other.plugin.flashUntil = performance.now() + BUMPER_FLASH_MS;
           particleManager.spawnSpark(other.position.x, other.position.y, COLORS.trampoline, 6);
+        } else if (other.label === 'bouncePad') {
+          // A direct velocity kick, not restitution, is what actually sends
+          // the marble flying (see config.js's BOUNCE_PAD_LAUNCH_SPEED for
+          // why) — most of its existing sideways drift carries through, plus
+          // a small random nudge, so the launch keeps some personality
+          // instead of firing dead straight up every time.
+          const marbleBody = bodyA.label === 'marble' ? bodyA : bodyB;
+          const spread = marbleBody.velocity.x * 0.5 + (Math.random() - 0.5) * 4;
+          physics.setBodyVelocity(marbleBody, { x: spread, y: -BOUNCE_PAD_LAUNCH_SPEED });
+          other.plugin.flashUntil = performance.now() + BOUNCE_PAD_FLASH_MS;
+          // Drives the sink-then-spring mat animation in renderer.js — purely
+          // visual, doesn't feed back into physics at all.
+          other.plugin.hitAt = performance.now();
+          particleManager.spawnSpark(other.position.x, other.position.y, COLORS.bouncePad, 18);
         }
       });
     });
@@ -86,11 +112,14 @@ export class Race {
   update(deltaMs) {
     this.spinners.forEach((s) => s.update(deltaMs));
     this.magnetClock += deltaMs;
+    this.vortexClock += deltaMs;
     this.marbles.forEach((m) => {
       if (m.finished) return;
       m.jitter();
       this.applyWindZones(m);
       this.applyMagnets(m);
+      this.applyWindVortices(m);
+      this.applyWallPush(m);
     });
     // Matter's collision check is discrete: it only looks at where a body
     // ends up after a step, never the path it swept to get there. The speed
@@ -179,6 +208,61 @@ export class Race {
       const strength = (repelling ? -MAGNET_REPEL_FORCE : MAGNET_ATTRACT_FORCE) * falloff;
       physics.applyForceToBody(marble.body, { x: (dx / dist) * strength, y: (dy / dist) * strength });
     });
+  }
+
+  // Same pull-then-burst cycle shape as the magnet, but the "pulling in"
+  // phase also gets a tangential push (perpendicular to the line toward the
+  // center) on top of the radial one — that combination is what makes a
+  // marble curve inward along a spiral instead of just sliding straight at
+  // the center, so it reads as being caught in a whirlwind rather than
+  // yanked by a magnet.
+  isWindVortexBursting() {
+    return this.vortexClock % WIND_VORTEX_CYCLE_MS >= WIND_VORTEX_CYCLE_MS - WIND_VORTEX_BURST_MS;
+  }
+
+  applyWindVortices(marble) {
+    if (this.windVortices.length === 0) return;
+    const bursting = this.isWindVortexBursting();
+    this.windVortices.forEach((vortex) => {
+      const dx = vortex.x - marble.body.position.x;
+      const dy = vortex.y - marble.body.position.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < 1 || dist > WIND_VORTEX_RADIUS) return;
+      const falloff = 1 - dist / WIND_VORTEX_RADIUS;
+      if (bursting) {
+        const strength = WIND_VORTEX_BURST_FORCE * falloff;
+        physics.applyForceToBody(marble.body, { x: (-dx / dist) * strength, y: (-dy / dist) * strength });
+        return;
+      }
+      const radialStrength = WIND_VORTEX_PULL_FORCE * falloff;
+      const swirlStrength = WIND_VORTEX_SWIRL_FORCE * falloff;
+      // Perpendicular to the (dx, dy) radial direction — rotates the pull
+      // into a tangent, i.e. the swirl.
+      const tx = -dy / dist;
+      const ty = dx / dist;
+      physics.applyForceToBody(marble.body, {
+        x: (dx / dist) * radialStrength + tx * swirlStrength,
+        y: (dy / dist) * radialStrength + ty * swirlStrength,
+      });
+    });
+  }
+
+  // Without this, a marble that ends up pressed against the curved tube
+  // wall can just ride that curve for a long stretch — a flat, uninteresting
+  // line, and an easy way to glide past obstacles that assume some lateral
+  // drift. The push grows smoothly from nothing at WALL_PUSH_MARGIN away up
+  // to full strength right at the wall, rather than snapping on/off, so it
+  // reads as a gentle steer back toward the middle, not an invisible wall.
+  applyWallPush(marble) {
+    const { x, y } = marble.body.position;
+    const center = map.centerX(y);
+    const halfWidth = map.tubeHalfWidthAt(y);
+    const offsetFromCenter = x - center;
+    const distToWall = halfWidth - Math.abs(offsetFromCenter) - MARBLE_RADIUS;
+    if (distToWall >= WALL_PUSH_MARGIN) return;
+    const falloff = 1 - Math.max(distToWall, 0) / WALL_PUSH_MARGIN;
+    const direction = offsetFromCenter > 0 ? -1 : 1;
+    physics.applyForceToBody(marble.body, { x: direction * WALL_PUSH_FORCE * falloff, y: 0 });
   }
 
   // Recomputes, every frame, which racers are currently resting on top of
