@@ -87,9 +87,19 @@ function tubeChain(side, bodies) {
 
 // Shared spacing formula so pegField's stagger phases always match what
 // pegRow will independently compute for the same row.
+//
+// `half` used to be the IDEAL tubeHalfWidthAt(y) curve directly, with
+// `margin` (42) meant to leave real clearance between the edge peg
+// (PEG_RADIUS=15) and the wall. That held up while the wall was thin (12),
+// but after thickening it to 24 (see WALL_THICKNESS's comment) the wall's
+// real inner face moved 6px further in without this margin accounting for
+// it — measured out to an actual 15px gap between the edge peg and the real
+// wall, LESS than a marble's 16px diameter, wedging marbles right there.
+// Same fix as fittedSpinnerLength: measure from the real wall face, not the
+// ideal curve.
 function pegSpacingAt(y, count) {
   const margin = 42;
-  const half = tubeHalfWidthAt(y);
+  const half = tubeHalfWidthAt(y) - WALL_THICKNESS / 2;
   const left = centerX(y) - half + margin;
   const right = centerX(y) + half - margin;
   return { left, right, spacing: (right - left) / (count - 1) };
@@ -163,38 +173,70 @@ function bumper(y, offsetRatio, bodies) {
   bodies.push(body);
 }
 
-// A converging pair of angled walls. Their outer ends reach out toward the
-// tube wall (by `overlap`) and the inner tips leave a fixed `innerGap`
-// regardless of the local tube width, so the passage never becomes too tight
-// for a marble even where the tube is narrowed.
+// A converging pair of angled walls. Their outer ends reach PAST the tube
+// wall (`WALL_OVERLAP` below) instead of stopping short of it, and the inner
+// tips leave a fixed `innerGap` regardless of the local tube width, so the
+// passage never becomes too tight for a marble even where the tube is
+// narrowed.
 //
-// `overlap` defaults to 0 (not actually reaching the tube wall) rather than
-// overlapping it, even though that can leave a narrow gap for a marble to
-// slip past ungated right along the wall. A positive overlap seems safer at
-// a glance, but wherever the tube's own curve is bending across the plank's
-// vertical span (which happens anywhere along this winding course), a
-// straight plank extended out to meet it can end up crossing the curved
-// wall at a bad angle instead of running alongside it — carving out a tiny
-// dead-end corner pocket right where they cross. A marble landing there is
-// genuinely stuck: normal forces from the two nearly-perpendicular surfaces
-// hold it in place regardless of friction (confirmed by simulating it with
-// friction set to zero and it still didn't budge), so it just sits there
-// jittering in place forever — looking like gravity stopped affecting it —
-// instead of ever finishing. Letting a rare marble slip past ungated is a
-// far smaller cost than the race being able to freeze entirely.
-function funnelPair(y, angle, innerGap, bodies, overlap = 0) {
+// This went through two earlier designs, both wrong in opposite directions:
+// (1) aim the outer ends exactly AT the tube wall (reach =
+// tubeHalfWidthAt(funnelY), no margin) — safe while the funnel angle was
+// shallow (the plank's tilt keeps its tip close to y=funnelY, so "reach the
+// ideal curve at funnelY" was a good enough stand-in for "reach the real
+// wall at the TIP's own y", which drifts away from funnelY along a tilted
+// plank). Once the angle was steepened for flow (see the bottleneck
+// funnel's own comment), that drift stopped being negligible and opened a
+// real gap beside the funnel that marbles fell through.
+// (2) pull the reach IN by a WALL_CLEARANCE margin instead, on the theory
+// that a wide, deliberate gap is safer than a knife's-edge near-miss.
+// Confirmed by direct simulation this DID stop marbles from getting wedged
+// at the tip, but it also gave fast-moving marbles a clean run of open space
+// right beside the tube wall, which turned out to matter: enough speed
+// carried through it that some tunneled straight through the (thin, at the
+// time) tube wall itself and left the course entirely.
+// Pushing the tip PAST the wall instead removes the open lane altogether —
+// there's no gap left for anything to slip through, fast or slow. The
+// wedge-pocket risk design (1) was worried about (a straight plank crossing
+// the curved wall at a bad angle) mostly doesn't apply here: two overlapping
+// STATIC bodies just merge into one continuous blocked region from the
+// marble's side, with no re-entrant notch. The same trap simulation that
+// verified design (2) still occasionally finds one marble resting motionless
+// partway along the now-longer plank itself in an adversarial worst case
+// (dropped from a near-standstill right beside it) — that's a marble resting
+// on an ordinary flat surface, not wedged in a notch, and isn't reproducible
+// in real play (a marble reaches any funnel with real fall speed, and
+// applyWallPush/jitter still act on it) — full-race simulation across all
+// three themes confirms no marble ever actually stalls there.
+// `funnels`, when passed, collects { y } for every funnel this creates —
+// race.js uses it to know exactly where to suppress bounce (see
+// applyFunnelDamping / FUNNEL_RESTITUTION in config.js for why that can't
+// just be a restitution on these wall bodies themselves).
+function funnelPair(y, angle, innerGap, bodies, overlap = 0, funnels) {
+  // Needs to clear not just the ideal curve but the real wall's solid inner
+  // face (WALL_THICKNESS/2 further out) AND the worst-case curve drift over
+  // the plank's own vertical footprint at steep angles (~50-60px observed
+  // for the current angles) — 60 clears all of that with room to spare.
+  // Confirmed by direct simulation (many full-race trials, all three
+  // themes): 0 marbles ever escape the course through a funnel gap.
+  const WALL_OVERLAP = 60;
   const cos = Math.cos(angle);
-  const outerReach = tubeHalfWidthAt(y) + overlap;
+  const outerReach = tubeHalfWidthAt(y) + WALL_OVERLAP + overlap;
   const innerGapHalf = innerGap / 2;
   const halfLength = (outerReach - innerGapHalf) / (2 * cos);
   const offset = innerGapHalf + halfLength * cos;
   const cx = centerX(y);
   bodies.push(
-    physics.createRectBody(cx - offset, y, halfLength * 2, 14, { isStatic: true, label: 'wall', angle })
+    physics.createRectBody(cx - offset, y, halfLength * 2, 14, { isStatic: true, label: 'funnelWall', angle })
   );
   bodies.push(
-    physics.createRectBody(cx + offset, y, halfLength * 2, 14, { isStatic: true, label: 'wall', angle: -angle })
+    physics.createRectBody(cx + offset, y, halfLength * 2, 14, {
+      isStatic: true,
+      label: 'funnelWall',
+      angle: -angle,
+    })
   );
+  if (funnels) funnels.push({ y });
 }
 
 // A single tilted plank that stops well short of the tube wall (a real open
@@ -203,19 +245,45 @@ function funnelPair(y, angle, innerGap, bodies, overlap = 0) {
 // "overlaps") and crosses past the centerline on the inner end, so
 // consecutive alternating planks always overlap in the middle and no marble
 // can fall straight through untouched.
-function slalomPlank(y, angle, side, bodies) {
+//
+// `tiltOutward` controls which end is the HIGH end. Default (false) tilts
+// the plank with its OUTER end (toward the tube wall) higher than its inner
+// end, so a marble sliding down it rolls toward the CENTER — where the next
+// alternating plank is waiting, the actual "zigzag" weave. The old default
+// was the reverse (outer end low), which sent marbles sliding straight into
+// the corner pocket between the plank's outer tip and the curved tube
+// wall — the same wedge-trap shape as funnelPair's overlap=0 comment above
+// — where they could sit nearly motionless instead of continuing down.
+// `tiltOutward: true` keeps that old direction for the rare deliberate
+// exception.
+function slalomPlank(y, angle, side, bodies, tiltOutward = false) {
   const outerReach = tubeHalfWidthAt(y) - 60;
   const innerCross = 20;
   const cos = Math.cos(angle);
   const length = (outerReach + innerCross) / cos;
   const offset = (side * (outerReach - innerCross)) / 2;
+  const rotation = tiltOutward ? side * angle : -side * angle;
   bodies.push(
     physics.createRectBody(centerX(y) + offset, y, length, 14, {
       isStatic: true,
-      label: 'wall',
-      angle: side * angle,
+      label: 'slalomPlank',
+      angle: rotation,
     })
   );
+}
+
+// Gate row (lane choice): a short line of evenly spaced posts across the
+// tube. Four posts (up from the old three) leaves five narrower lanes
+// instead of four wider ones, so picking a lane actually matters more.
+function gateRow(y, bodies) {
+  [-0.5, -0.17, 0.17, 0.5].forEach((offsetRatio) => {
+    bodies.push(
+      physics.createRectBody(centerX(y) + offsetRatio * tubeHalfWidthAt(y), y, 14, 80, {
+        isStatic: true,
+        label: 'wall',
+      })
+    );
+  });
 }
 
 // A rotating spinner/windmill sweeps a full circle of radius = half its
@@ -225,8 +293,17 @@ function slalomPlank(y, angle, side, bodies) {
 // clip into a static wall on every rotation. This clamps the desired length
 // down to whatever actually fits the local tube width, so obstacles can be
 // made longer without needing to hand-place each one at a "wide" point.
+//
+// `half` used to be the IDEAL tubeHalfWidthAt(y) curve directly, but the
+// real tubeChain wall's solid inner face sits WALL_THICKNESS/2 inside that
+// curve — fine while the wall was thin (12), but after thickening it to 24
+// (see that constant's comment) the windmill/spinners were still being
+// fitted against the OLD, now-too-generous boundary and could physically
+// clip the real (now-closer) wall on every rotation, jamming the windmill
+// solid instead of ever tipping open. Subtracting the real inset here fixes
+// that regardless of what WALL_THICKNESS is tuned to later.
 function fittedSpinnerLength(y, desiredLength, offsetRatio) {
-  const half = tubeHalfWidthAt(y);
+  const half = tubeHalfWidthAt(y) - WALL_THICKNESS / 2;
   const centerOffset = Math.abs(offsetRatio) * half;
   const safety = 20;
   const maxHalfLength = Math.max(40, half - centerOffset - safety);
@@ -249,6 +326,7 @@ function createDarkCourse() {
   const slowZones = [];
   const magnets = [];
   const windVortices = [];
+  const funnels = [];
 
   // Winding tube boundary (replaces straight side walls); its width itself
   // also varies along the way, not just its left-right curve.
@@ -259,8 +337,13 @@ function createDarkCourse() {
   pegField(150 * S, 55 * S, 7, 5, bodies);
 
   // 2. Narrowing bottleneck funnel — tight enough that marbles have to
-  // queue single-file, jostling for who gets through first.
-  funnelPair(600 * S, 0.15, 20, bodies);
+  // queue single-file, jostling for who gets through first. Angle steepened
+  // from 0.15 to 0.30 — the gravity component that actually pulls a marble
+  // IN toward the gap is g*sin(angle), so the old shallow angle barely
+  // pulled at all and a marble landing off-center could take well over a
+  // second just crawling sideways (confirmed by direct simulation). A
+  // steeper wall gets it there in a fraction of that.
+  funnelPair(600 * S, 0.3, 20, bodies, 0, funnels);
 
   // 3. Power bumper arena 1 (chaotic bounces, can undo a lead)
   bumper(800 * S, -0.52, bodies);
@@ -321,44 +404,36 @@ function createDarkCourse() {
   // on anyone passing through — see race.js's applySlowZones), so it's a
   // real rubber-band rather than something the whole field feels equally.
   // Starts a generous 220px after the bounce pad (not overlapping it).
+  // Length shortened from 210*S to 120*S — at SLOW_ZONE_MAX_SPEED (3px/f)
+  // the old length stalled a leader for nearly 100 frames (~1.6s), longer
+  // than felt good.
   const slowZoneStart = bouncePadY + 220;
-  slowZones.push({ yStart: slowZoneStart, yEnd: slowZoneStart + (1650 * S - 1440 * S) });
+  slowZones.push({ yStart: slowZoneStart, yEnd: slowZoneStart + 120 * S });
 
-  // 6. Zigzag slalom — 6 planks now (up from 4), with a wide 160px gap above
-  // the first one so it reads as clearly separate from the slow zone rather
-  // than crowding right up against it. Everything through bumper arena 3
-  // below shifts later with it by the same amount the slalom grew, keeping
-  // all the tested gaps between sections unchanged.
+  // 6. Zigzag slalom — 4 planks, with a wide 160px gap above the first one
+  // so it reads as clearly separate from the slow zone rather than crowding
+  // right up against it.
   //
   // Angle bumped up from 0.1 to 0.22 (~5.7deg to ~12.6deg) — but the angle
   // alone was never the reason marbles used to sit dead-still on a plank
   // for tens of seconds at a time (0.28 alone didn't fix it either; see
   // entities/marble.js's frictionStatic comment for the real cause). This
   // steeper tilt is just a smaller, secondary help on top of that fix.
-  slalomPlank(2409 * S, 0.22, 1, bodies);
+  //
+  // Only the first plank keeps the old outward tilt (see slalomPlank's
+  // comment) — the rest tilt inward so marbles weave toward the center
+  // instead of sliding into the corner pocket by the tube wall.
+  slalomPlank(2409 * S, 0.22, 1, bodies, true);
   slalomPlank(2519 * S, 0.22, -1, bodies);
   slalomPlank(2629 * S, 0.22, 1, bodies);
   slalomPlank(2739 * S, 0.22, -1, bodies);
-  slalomPlank(2849 * S, 0.22, 1, bodies);
-  slalomPlank(2959 * S, 0.22, -1, bodies);
 
-  // 7. Peg field 2 (extra row so there's more time — and more chances to
-  // get knocked around — before the next chokepoint)
-  pegField(3019 * S, 45 * S, 8, 5, bodies);
+  // 7. (Peg field 2 removed — only one peg field left in this course now,
+  // see item 1. Plain open stretch here instead.)
 
-  // 8. Gate row (lane choice) — a third, center post narrows every lane
-  // enough that picking one actually matters instead of all three being
-  // wide-open. Kept well clear of peg field 2 above it (224px of open
-  // space) so marbles have real room to settle before having to pick a lane.
+  // 8. Gate row (lane choice)
   const gateY = 3709 * S;
-  [-0.4, 0, 0.4].forEach((offsetRatio) => {
-    bodies.push(
-      physics.createRectBody(centerX(gateY) + offsetRatio * tubeHalfWidthAt(gateY), gateY, 14, 80, {
-        isStatic: true,
-        label: 'wall',
-      })
-    );
-  });
+  gateRow(gateY, bodies);
 
   // 8b. Magnet — pulls marbles in toward its center for most of its cycle,
   // then shoves them back out in a short burst, scattering whoever's nearby
@@ -407,13 +482,11 @@ function createDarkCourse() {
   bodies.push(windmillBody);
   spinners.push({ body: windmillBody, color: COLORS.windmill, update() {} });
 
-  // 10. Power bumper arena 2 (late-race chaos)
-  bumper(4309 * S, -0.52, bodies);
-  bumper(4309 * S, 0.52, bodies);
-  bumper(4439 * S, 0, bodies);
+  // 10. (Power bumper arena 2 removed — arena 1 and arena 3 stay, plain open
+  // stretch here instead.)
 
-  // 11. Peg field 3
-  pegField(4559 * S, 55 * S, 6, 5, bodies);
+  // 11. (Peg field 3 removed — only one peg field left in this course now,
+  // see item 1. Plain open stretch here instead.)
 
   // 11b. Power bumper arena 3 (extra late-race chaos, extends the course)
   const bumperArena3Y = 4959 * S;
@@ -426,20 +499,20 @@ function createDarkCourse() {
   // 5c, but late in the course instead of mid-course, so whoever's leading
   // this late isn't safe until they're actually across the line. Given the
   // same generous margin above (100px clear of bumper arena 3, up from the
-  // old 15px) as the first slow zone, and peg field 4 below shifts later to
-  // match so the zone's own span and the gap after it stay unchanged.
+  // old 15px) as the first slow zone.
   const finalSlowZoneStart = bumperArena3LastY + BUMPER_RADIUS + 100;
   const finalSlowZoneEnd = finalSlowZoneStart + 100;
   slowZones.push({ yStart: finalSlowZoneStart, yEnd: finalSlowZoneEnd });
 
-  // 11c. Peg field 4 (one last deflection field before the run-in)
-  const pegField4Y = 5258 * S;
-  pegField(pegField4Y, 45 * S, 3, 5, bodies);
+  // (Peg field 4, the last deflection field before the run-in, was removed
+  // — this is now a plain open stretch straight into the final funnel.)
 
   // 12. Final funnel into the goal corridor — 5428 must stay in sync with
-  // config.js's COURSE_HEIGHT/GOAL_Y (see the comment there).
+  // config.js's COURSE_HEIGHT/GOAL_Y (see the comment there). Angle
+  // steepened to 0.32 for the same reason as the bottleneck funnel above —
+  // a decisive final pull into the goal instead of a slow crawl to center.
   const finalFunnelY = 5428 * S;
-  funnelPair(finalFunnelY, 0.18, 20, bodies);
+  funnelPair(finalFunnelY, 0.32, 20, bodies, 0, funnels);
 
   // Floor — thick enough that a marble carrying a lot of speed after the
   // full drop (or a late bumper fling) can't tunnel straight through a
@@ -454,15 +527,17 @@ function createDarkCourse() {
 
   bodies.push(...spinners.map((s) => s.body));
 
-  return { bodies, spinners, slowZones, magnets, windVortices };
+  return { bodies, spinners, slowZones, magnets, windVortices, funnels };
 }
 
 // 네온 사이버's course — a faster, more mechanical/chaotic gauntlet: short
 // intro peg field, wind-vortex+bounce-pad combo front-loaded right after
-// the funnel, two doubled bumper arenas each followed by a full spinner
-// gauntlet, a deliberate open breather stretch, then the late-race hazard
-// cluster (gate/magnet/windmill) and a short outro peg field. Every
-// obstacle-to-obstacle gap below reuses a value already proven safe
+// the funnel, a doubled bumper arena followed by a full spinner gauntlet
+// (twice — the second gauntlet now follows an open stretch instead of its
+// own bumper arena), a 4-plank zigzag slalom, a deliberate open breather
+// stretch, then the late-race hazard cluster (gate/magnet/windmill) straight into
+// the final funnel. Every obstacle-to-obstacle gap below reuses a value
+// already proven safe
 // between those same two obstacle types somewhere in createDarkCourse()
 // (only the SEQUENCE differs, not the transition geometry) — see map.js's
 // git history / the session that added this for the full gap catalog this
@@ -477,6 +552,7 @@ function createNeonCourse() {
   const slowZones = [];
   const magnets = [];
   const windVortices = [];
+  const funnels = [];
 
   tubeChain(-1, bodies);
   tubeChain(1, bodies);
@@ -484,9 +560,11 @@ function createNeonCourse() {
   // 1. Short intro peg field (4 rows vs dark's 7)
   pegField(150 * S, 55 * S, 4, 5, bodies); // last row unscaled = 150+3*55=315
 
-  // 2. Funnel — reuses tested pegField->funnel gap (120)
+  // 2. Funnel — reuses tested pegField->funnel gap (120). Angle steepened
+  // to 0.30 (see dark's bottleneck funnel comment for why the old 0.15 was
+  // too shallow to pull a marble to center at any reasonable speed).
   const funnelY = 315 + 120; // 435
-  funnelPair(funnelY * S, 0.15, 20, bodies);
+  funnelPair(funnelY * S, 0.3, 20, bodies, 0, funnels);
 
   // 3. Wind vortex + bounce pad, front-loaded. No exact dark pairing for
   // "funnel->vortex" exists, so this uses the funnel->bumperArena gap (200)
@@ -499,14 +577,16 @@ function createNeonCourse() {
   const bouncePadY = vortexY + 500; // 1389 (raw, matches dark's convention)
   bouncePad(bouncePadY, bodies, vortexX);
   const slowZoneStart = bouncePadY + 220; // 1609 (raw)
-  const slowZoneEnd = slowZoneStart + 210 * S; // 1903
+  // Length shortened from 210*S to 120*S, matching dark's first slow zone
+  // (see that comment for why the old length stalled a leader too long).
+  const slowZoneEnd = slowZoneStart + 120 * S; // 1777
   slowZones.push({ yStart: slowZoneStart, yEnd: slowZoneEnd });
 
   // 4. Doubled bumper arena #1 (two arena-1-style triples back to back)
-  const bumperA1 = slowZoneEnd + 200 * S; // 2183
-  const bumperA2 = bumperA1 + 120 * S; // 2351
-  const bumperA3 = bumperA2 + 120 * S; // 2519
-  const bumperA4 = bumperA3 + 120 * S; // 2687
+  const bumperA1 = slowZoneEnd + 200 * S; // 2057
+  const bumperA2 = bumperA1 + 120 * S; // 2225
+  const bumperA3 = bumperA2 + 120 * S; // 2393
+  const bumperA4 = bumperA3 + 120 * S; // 2561
   bumper(bumperA1, -0.52, bodies);
   bumper(bumperA1, 0.52, bodies);
   bumper(bumperA2, 0, bodies);
@@ -515,7 +595,7 @@ function createNeonCourse() {
   bumper(bumperA4, 0, bodies);
 
   // 5. Spinner gauntlet #1
-  const spinner1Y = bumperA4 + 160 * S; // 2911
+  const spinner1Y = bumperA4 + 160 * S; // 2785
   [
     { y: spinner1Y, offsetRatio: -0.22, speed: SPINNER_SPEED },
     { y: spinner1Y + 140 * S, offsetRatio: 0.22, speed: -SPINNER_SPEED },
@@ -524,22 +604,18 @@ function createNeonCourse() {
     const length = fittedSpinnerLength(y, SPINNER_LENGTH, offsetRatio);
     spinners.push(new Spinner(centerX(y) + offsetRatio * tubeHalfWidthAt(y), y, length, 14, speed, COLORS.spinner));
   });
-  const gauntlet1LastY = spinner1Y + 280 * S; // 3303
+  const gauntlet1LastY = spinner1Y + 280 * S; // 3177
 
-  // 6. Doubled bumper arena #2
-  const bumperC1 = gauntlet1LastY + 200 * S; // 3583
-  const bumperC2 = bumperC1 + 120 * S; // 3751
-  const bumperC3 = bumperC2 + 120 * S; // 3919
-  const bumperC4 = bumperC3 + 120 * S; // 4087
-  bumper(bumperC1, -0.52, bodies);
-  bumper(bumperC1, 0.52, bodies);
-  bumper(bumperC2, 0, bodies);
-  bumper(bumperC3, -0.52, bodies);
-  bumper(bumperC3, 0.52, bodies);
-  bumper(bumperC4, 0, bodies);
+  // 6. (Doubled bumper arena #2 removed — arena #1 stays. bumperC1..C4 are
+  // kept as pure Y markers so spinner gauntlet #2 below stays at exactly
+  // the same position.)
+  const bumperC1 = gauntlet1LastY + 200 * S; // 3457
+  const bumperC2 = bumperC1 + 120 * S; // 3625
+  const bumperC3 = bumperC2 + 120 * S; // 3793
+  const bumperC4 = bumperC3 + 120 * S; // 3961
 
   // 7. Spinner gauntlet #2
-  const spinner2Y = bumperC4 + 160 * S; // 4311
+  const spinner2Y = bumperC4 + 160 * S; // 4185
   [
     { y: spinner2Y, offsetRatio: -0.22, speed: SPINNER_SPEED },
     { y: spinner2Y + 140 * S, offsetRatio: 0.22, speed: -SPINNER_SPEED },
@@ -548,25 +624,32 @@ function createNeonCourse() {
     const length = fittedSpinnerLength(y, SPINNER_LENGTH, offsetRatio);
     spinners.push(new Spinner(centerX(y) + offsetRatio * tubeHalfWidthAt(y), y, length, 14, speed, COLORS.spinner));
   });
-  const gauntlet2LastY = spinner2Y + 280 * S; // 4703
+  const gauntlet2LastY = spinner2Y + 280 * S; // 4577
+
+  // 7b. Zigzag slalom — 4 planks, reusing dark's exact angle (0.22) and
+  // 110*S internal spacing (both already tested there). Placed right at the
+  // front of the open breather stretch below (entry gap reuses the
+  // funnel->bumperArena(200) value), which still leaves the gate row over
+  // 1300px of genuinely obstacle-free track clear after it. Only the first
+  // plank keeps the old outward tilt (see slalomPlank's comment) — the rest
+  // tilt inward so marbles weave toward the center.
+  const slalomY = gauntlet2LastY + 200 * S; // 4857
+  slalomPlank(slalomY, 0.22, 1, bodies, true);
+  slalomPlank(slalomY + 110 * S, 0.22, -1, bodies);
+  slalomPlank(slalomY + 220 * S, 0.22, 1, bodies);
+  slalomPlank(slalomY + 330 * S, 0.22, -1, bodies);
 
   // 8. Open breather stretch — no obstacles, just the existing tubeChain
   // walls (already proven safe across the whole COURSE_HEIGHT range
   // regardless of what's inside it), so zero wall-trap risk. Deliberate
-  // pacing beat after two dense bumper+spinner blocks; length is exactly
-  // whatever's needed so the hazard cluster + outro land the final funnel
-  // on the required 5428*S.
-  const gateY = gauntlet2LastY + 2000.2; // 6703.2
+  // pacing beat after two dense bumper+spinner blocks (and now the slalom
+  // above); length (2000.2 + the 126 the shortened slow zone above no
+  // longer eats up) is exactly whatever's needed so the hazard cluster
+  // lands the final funnel on the required 5428*S.
+  const gateY = gauntlet2LastY + 2126.2; // 6703.2
 
   // 9. Gate row
-  [-0.4, 0, 0.4].forEach((offsetRatio) => {
-    bodies.push(
-      physics.createRectBody(centerX(gateY) + offsetRatio * tubeHalfWidthAt(gateY), gateY, 14, 80, {
-        isStatic: true,
-        label: 'wall',
-      })
-    );
-  });
+  gateRow(gateY, bodies);
 
   // 10. Magnet — reuses gate->magnet gap (164)
   const magnetY = gateY + 164 * S; // 6932.8
@@ -594,15 +677,15 @@ function createNeonCourse() {
   bodies.push(windmillBody);
   spinners.push({ body: windmillBody, color: COLORS.windmill, update() {} });
 
-  // 12. Short outro peg field — reuses bumperArena->pegField gap (120)
-  const pegOutroY = windmillY + 120 * S; // 7361.2
-  pegField(pegOutroY, 45 * S, 3, 5, bodies);
-  const pegOutroLastY = pegOutroY + 2 * 45 * S; // 7487.2
+  // 12. (Short outro peg field removed — plain open stretch straight into
+  // the final funnel instead.)
 
-  // 13. Final funnel — MUST land at exactly 5428*S = 7599.2. Reuses tested
-  // pegField->finalFunnel gap (80).
-  const finalFunnelY = pegOutroLastY + 80 * S; // 7599.2 === 5428 * S
-  funnelPair(finalFunnelY, 0.18, 20, bodies);
+  // 13. Final funnel — MUST land at exactly 5428*S = 7599.2. Same total gap
+  // the outro peg field used to fill (120*S in + its own 90*S span + 80*S
+  // out = 406), now just one open span. Angle steepened to 0.32, same as
+  // dark's final funnel.
+  const finalFunnelY = windmillY + 406; // 7599.2 === 5428 * S
+  funnelPair(finalFunnelY, 0.32, 20, bodies, 0, funnels);
 
   const floorY = COURSE_HEIGHT - 60;
   bodies.push(
@@ -614,12 +697,12 @@ function createNeonCourse() {
 
   bodies.push(...spinners.map((s) => s.body));
 
-  return { bodies, spinners, slowZones, magnets, windVortices };
+  return { bodies, spinners, slowZones, magnets, windVortices, funnels };
 }
 
-// 파스텔 캔디's course — a softer, bouncier candy course: long peg fields (6
-// fields total, up to 8 rows each), more bumper arenas (4 vs dark's 3), a
-// shorter/gentler slalom (4 planks at 0.18 rad vs dark's 6 at 0.22), gate +
+// 파스텔 캔디's course — a softer, bouncier candy course: one peg field (8
+// rows) up front, more bumper arenas (3 vs dark's 2), a gentler slalom (4
+// planks at 0.18 rad vs dark's 0.22), gate +
 // magnet for variety, but no wind-vortex/bounce-pad combo, no windmill
 // trapdoor, and no spinner gauntlet — the mechanical/fast obstacles all
 // live in the neon course instead, keeping this one's identity as "many
@@ -631,6 +714,7 @@ function createPastelCourse() {
   const slowZones = [];
   const magnets = [];
   const windVortices = [];
+  const funnels = [];
 
   tubeChain(-1, bodies);
   tubeChain(1, bodies);
@@ -639,9 +723,12 @@ function createPastelCourse() {
   pegField(150 * S, 55 * S, 8, 5, bodies); // last unscaled = 150+7*55=535
 
   // 2. Funnel — slightly gentler innerGap (24 vs dark's 20, MORE generous).
-  // Reuses pegField->funnel gap (120).
+  // Reuses pegField->funnel gap (120). Angle steepened to 0.28 — a touch
+  // gentler than dark/neon's 0.30 to keep pastel's softer identity, but
+  // still enough of a pull that marbles don't just crawl to center (see
+  // dark's bottleneck funnel comment for why the old 0.15 was too shallow).
   const funnelYUnscaled = 535 + 120; // 655
-  funnelPair(funnelYUnscaled * S, 0.15, 24, bodies);
+  funnelPair(funnelYUnscaled * S, 0.28, 24, bodies, 0, funnels);
 
   // 3. Bumper arena 1 — reuses funnel->bumperArena(200), internal(120)
   const bumperA1 = (funnelYUnscaled + 200) * S; // 1197
@@ -650,9 +737,10 @@ function createPastelCourse() {
   bumper(bumperA1, 0.52, bodies);
   bumper(bumperA2, 0, bodies);
 
-  // 4. Peg field 2 — 8 rows, reuses bumperArena->pegField(120)
+  // 4. (Peg field 2 removed — only one peg field left in this course now,
+  // see item 1. pegField2Y/LastY are kept as pure Y markers so every
+  // section below stays at exactly the same position.)
   const pegField2Y = bumperA2 + 120 * S; // 1533
-  pegField(pegField2Y, 45 * S, 8, 5, bodies);
   const pegField2LastY = pegField2Y + 7 * 45 * S; // 1974
 
   // 5. Bumper arena 2 — reuses pegField->bumperArena(125), internal(130)
@@ -662,21 +750,13 @@ function createPastelCourse() {
   bumper(bumperB1, 0.52, bodies);
   bumper(bumperB2, 0, bodies);
 
-  // 6. Peg field 3 — 6 rows, reuses bumperArena->pegField(120)
+  // 6. (Peg field 3 removed — same reasoning as peg field 2 above.)
   const pegField3Y = bumperB2 + 120 * S; // 2499
-  pegField(pegField3Y, 55 * S, 6, 5, bodies);
   const pegField3LastY = pegField3Y + 5 * 55 * S; // 2884
 
   // 7. Gate row — reuses pegField->gate(375)
   const gateY = pegField3LastY + 375 * S; // 3409
-  [-0.4, 0, 0.4].forEach((offsetRatio) => {
-    bodies.push(
-      physics.createRectBody(centerX(gateY) + offsetRatio * tubeHalfWidthAt(gateY), gateY, 14, 80, {
-        isStatic: true,
-        label: 'wall',
-      })
-    );
-  });
+  gateRow(gateY, bodies);
 
   // 7b. Magnet — non-solid, safe anywhere; reuses gate->magnet(164) for
   // pacing consistency only.
@@ -684,40 +764,38 @@ function createPastelCourse() {
   magnets.push({ x: centerX(magnetY), y: magnetY });
 
   // 7c. Slow zone — also non-solid (pure Y-range velocity clamp, no body),
-  // placed in the open stretch after peg field 3.
+  // placed in the open stretch after where peg field 3 used to be.
   slowZones.push({ yStart: pegField3LastY + 100 * S, yEnd: pegField3LastY + 200 * S });
 
-  // 8. Slalom — SHORTER (4 planks vs dark's 6) and GENTLER (0.18 vs 0.22
+  // 8. Slalom — same 4-plank count as dark now, but GENTLER (0.18 vs 0.22
   // angle), same 110*S internal spacing as dark. No tested "gate->slalom"
   // pairing exists in dark, so this uses a raw +300px gap (NOT ×S — larger
   // than any tested "into a new solid obstacle" gap except pegField->gate
   // itself, so it errs safe). This raw (non-×S) addition is required for
   // the final-funnel arithmetic below to land correctly.
   const slalomStart = gateY + 300; // 3709
-  slalomPlank(slalomStart, 0.18, 1, bodies);
+  slalomPlank(slalomStart, 0.18, 1, bodies, true);
   slalomPlank(slalomStart + 110 * S, 0.18, -1, bodies);
   slalomPlank(slalomStart + 220 * S, 0.18, 1, bodies);
   slalomPlank(slalomStart + 330 * S, 0.18, -1, bodies);
   const slalomLastY = slalomStart + 330 * S; // 4171
 
-  // 9. Peg field 4 — reuses slalom->pegField(60)
+  // 9. (Peg field 4 removed — same reasoning as peg field 2 above.)
   const pegField4Y = slalomLastY + 60 * S; // 4255
-  pegField(pegField4Y, 55 * S, 5, 5, bodies);
   const pegField4LastY = pegField4Y + 4 * 55 * S; // 4563
 
-  // 10. Bumper arena 3 — reuses pegField->bumperArena(125), internal(130)
+  // 10. (Bumper arena 3 removed — arenas 1, 2 and 4 stay. bumperC1/C2 are
+  // kept as pure Y markers so peg field 5 below stays at exactly the same
+  // position.)
   const bumperC1 = pegField4LastY + 125 * S; // 4738
   const bumperC2 = bumperC1 + 130 * S; // 4920
-  bumper(bumperC1, -0.52, bodies);
-  bumper(bumperC1, 0.52, bodies);
-  bumper(bumperC2, 0, bodies);
 
-  // 11. Peg field 5 — 8 rows, reuses bumperArena->pegField(120)
+  // 11. (Peg field 5 removed — same reasoning as peg field 2 above.)
   const pegField5Y = bumperC2 + 120 * S; // 5088
-  pegField(pegField5Y, 55 * S, 8, 5, bodies);
   const pegField5LastY = pegField5Y + 7 * 55 * S; // 5627
 
-  // 12. Bumper arena 4 (4 total vs dark's 3) — reuses
+  // 12. Bumper arena 4 (3 total vs dark's 2, since arena 3 above was
+  // removed) — reuses
   // pegField->bumperArena(125), internal(120)
   const bumperD1 = pegField5LastY + 125 * S; // 5802
   const bumperD2 = bumperD1 + 120 * S; // 5970
@@ -725,16 +803,16 @@ function createPastelCourse() {
   bumper(bumperD1, 0.52, bodies);
   bumper(bumperD2, 0, bodies);
 
-  // 13. Peg field 6 — short outro, reuses bumperArena->pegField(120)
-  const pegField6Y = bumperD2 + 120 * S; // 6138
-  pegField(pegField6Y, 45 * S, 3, 5, bodies);
-  const pegField6LastY = pegField6Y + 2 * 45 * S; // 6264
+  // 13. (Peg field 6, the short outro, was removed — plain open stretch
+  // straight into the final funnel instead.)
 
-  // 14. Final funnel — MUST land at exactly 5428*S = 7599.2. The 1335.2px
-  // gap here is well above the tested minimum (80*S=112), so it's a
-  // generous "gentle final glide" fitting pastel's softer pacing.
-  const finalFunnelY = pegField6LastY + 1335.2; // 7599.2 === 5428 * S
-  funnelPair(finalFunnelY, 0.18, 20, bodies);
+  // 14. Final funnel — MUST land at exactly 5428*S = 7599.2. Same total gap
+  // peg field 6 used to fill (120*S in + its own 90*S span + 1335.2 out =
+  // 1629.2), now just one open span — still a generous glide fitting
+  // pastel's softer pacing. Angle steepened to 0.28, matching the intro
+  // funnel above.
+  const finalFunnelY = bumperD2 + 1629.2; // 7599.2 === 5428 * S
+  funnelPair(finalFunnelY, 0.28, 20, bodies, 0, funnels);
 
   const floorY = COURSE_HEIGHT - 60;
   bodies.push(
@@ -746,5 +824,5 @@ function createPastelCourse() {
 
   bodies.push(...spinners.map((s) => s.body)); // stays empty — fine, race.js handles an empty spinners array / missing windmillGate safely
 
-  return { bodies, spinners, slowZones, magnets, windVortices };
+  return { bodies, spinners, slowZones, magnets, windVortices, funnels };
 }

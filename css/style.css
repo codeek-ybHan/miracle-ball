@@ -49,15 +49,7 @@ body {
   font-family: 'Baloo 2', sans-serif;
   font-weight: 800;
   letter-spacing: 4px;
-  color: #ffe066;
-  text-shadow: 0 0 16px rgba(255, 224, 102, 0.55);
-}
-
-.hint {
-  font-size: 13px;
-  color: #9aa3d1;
-  margin: 0;
-  text-align: center;
+  color: #f4f6ff;
 }
 
 #name-input {
@@ -77,7 +69,7 @@ body {
 
 #name-input:focus {
   outline: none;
-  border-color: #5ee0ff;
+  border-color: #d7dcf5;
 }
 
 #shuffle-btn {
@@ -87,16 +79,16 @@ body {
   font-family: 'Baloo 2', sans-serif;
   font-size: 17px;
   font-weight: 700;
-  border: 2px solid #5ee0ff;
+  border: 2px solid #b8bccf;
   border-radius: 999px;
-  background: rgba(94, 224, 255, 0.1);
-  color: #5ee0ff;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4f6ff;
   cursor: pointer;
   transition: transform 0.15s ease, background 0.15s ease;
 }
 
 #shuffle-btn:hover:not(:disabled) {
-  background: rgba(94, 224, 255, 0.22);
+  background: rgba(255, 255, 255, 0.18);
   transform: translateY(-2px);
 }
 
@@ -141,16 +133,16 @@ body {
 }
 
 .theme-btn:hover {
-  border-color: #5ee0ff;
+  border-color: #d7dcf5;
   color: #f4f6ff;
   transform: translateY(-1px);
 }
 
 .theme-btn.selected {
-  border-color: #5ee0ff;
-  color: #5ee0ff;
-  background: rgba(94, 224, 255, 0.1);
-  box-shadow: 0 0 10px rgba(94, 224, 255, 0.4);
+  border-color: #f4f6ff;
+  color: #f4f6ff;
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
 }
 
 .theme-swatch {
@@ -172,18 +164,6 @@ body {
   background: #ffb6c1;
 }
 
-/* Dev/verification aid: lets whoever's looking at the page confirm they're
-   on a server that actually has the latest change, without needing to dig
-   through devtools or ask. Only ever holds the single most recent change —
-   replace the text here (and the date) rather than appending to it. */
-#changelog {
-  width: 100%;
-  max-width: 300px;
-  margin: 4px 0 0;
-  font-size: 11px;
-  color: #6d76a8;
-  text-align: center;
-}
 
 #restart-btn {
   padding: 12px 32px;
@@ -222,7 +202,7 @@ body {
   width: 100%;
   height: auto;
   display: block;
-  filter: invert(1);
+  border-radius: 16px;
 }
 
 #start-btn:hover:not(:disabled) {
@@ -264,7 +244,7 @@ canvas#game-canvas {
    instead of competing with the name-entry panel, then snaps back to full
    opacity the instant the race actually starts. */
 canvas#game-canvas.preview-dim {
-  opacity: 0.35;
+  opacity: 0.15;
 }
 
 /* Once the first marble finishes, the still-running race becomes a dimmed

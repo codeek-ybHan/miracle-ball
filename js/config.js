@@ -14,7 +14,21 @@ export const GOAL_Y = 5428 * S + 126;
 // fixed-resolution buffer that gets letterboxed).
 export const VIEWPORT_ANCHOR_RATIO = 0.36;
 
-export const WALL_THICKNESS = 12;
+// Thickened from 12 to 24 after finding marbles occasionally tunnel clean
+// through the tube boundary — see MARBLE_MAX_SPEED's comment for the general
+// mechanism. The 12+16=28 margin that MARBLE_MAX_SPEED (14) was tuned
+// against assumes a roughly head-on hit; a marble moving nearly TANGENT to a
+// wall (which happens easily right along the tube boundary, especially once
+// funnelPair's WALL_CLEARANCE gives a fast marble a real run of open space
+// right next to it) sees a much smaller EFFECTIVE thickness in its direction
+// of travel (thickness * sin(hit angle), well under the full 12px for a
+// shallow angle) — direct simulation confirmed marbles escaping the course
+// entirely through exactly this path. Doubling the thickness restores a real
+// margin at shallow angles too, at the cost of a few px less playable tube
+// width per side (negligible against a ~135-245px half-width) and a
+// slightly chunkier-looking wall band — both fine trade-offs for "the race
+// can't finish because a marble vanished."
+export const WALL_THICKNESS = 24;
 
 // The track winds left/right like a snaking tube instead of a straight lane,
 // and its width itself breathes wider/narrower as it goes (out of phase with
@@ -43,8 +57,10 @@ export const MARBLE_FRICTION_AIR = 0.008;
 // marble to tunnel clean through a thin wall in one step. Matter's collision
 // detection is discrete (checked only at each step's resolved position, not
 // swept along the path), so the cap needs real margin below
-// WALL_THICKNESS + marble diameter (12+16=28), not just barely under it —
-// 24 wasn't enough margin in practice and still let a marble through.
+// WALL_THICKNESS + marble diameter — 24 wasn't enough margin in practice
+// and still let a marble through even against the old WALL_THICKNESS (12).
+// See WALL_THICKNESS's own comment for the shallow-angle-hit case that
+// forced that constant up too, on top of this cap.
 export const MARBLE_MAX_SPEED = 14;
 // Small continuous random sideways nudge so marbles on near-identical paths
 // still diverge over a long fall (also breaks perfectly symmetric traps).
@@ -70,6 +86,33 @@ export const WALL_PUSH_FORCE = 0.0004;
 export const PEG_RADIUS = 15;
 export const PEG_BOUNCE_MS = 180;
 export const PEG_BOUNCE_SCALE = 1.7;
+
+// Slalom plank bounce: fires on every touch (same "guarantee it directly"
+// approach as the bounce pad below) so a marble always pops cleanly away
+// from the plank instead of possibly grazing/sliding along it and stalling
+// — see map.js's slalomPlank for the wedge-trap risk this also helps with.
+// SIDE_KICK adds a randomized (both magnitude and left/right direction)
+// horizontal component on top of whatever sideways drift the marble already
+// had, so consecutive hits scatter every which way ("사방팔방") instead of
+// each bounce just continuing whatever direction it was already drifting.
+export const SLALOM_BOUNCE_MIN_SPEED = 5;
+export const SLALOM_BOUNCE_SIDE_KICK = 3.5;
+
+// Funnel walls converge at a shallow angle purely to steer marbles into the
+// narrow gap, not to launch them — but Matter always resolves a collision's
+// restitution as Math.max(bodyA.restitution, bodyB.restitution), so the
+// funnel wall's own restitution can never make contact LESS springy than
+// the marble's own MARBLE_RESTITUTION (0.7). race.js's applyFunnelDamping
+// works around this by temporarily zeroing the MARBLE's own restitution
+// while it's within FUNNEL_ZONE_MARGIN of any funnel's y (restored the
+// instant it leaves), which is the only lever that actually works given
+// Matter's max() rule. FUNNEL_ZONE_MARGIN is sized for the steepest funnel
+// angle in use (see map.js) — it needs to fully cover the plank's actual
+// vertical footprint (plus marble radius) at the tube's widest point, or a
+// marble can bounce right at the edge of the zone where restitution hasn't
+// been zeroed yet.
+export const FUNNEL_RESTITUTION = 0;
+export const FUNNEL_ZONE_MARGIN = 120;
 
 export const SPINNER_SPEED = 0.7; // rad/sec
 export const SPINNER_LENGTH = 340;

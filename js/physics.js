@@ -68,6 +68,16 @@ export function setBodyVelocity(body, velocity) {
   Matter.Body.setVelocity(body, velocity);
 }
 
+// Matter recomputes each colliding pair's restitution fresh every physics
+// step (as Math.max of the two bodies' current .restitution), so toggling
+// this on a body before physics.step() actually takes effect that same
+// step — unlike a one-off velocity kick in a collision handler, which can
+// still get partly overridden by the resolver's own restitution impulse
+// afterward. See config.js's FUNNEL_RESTITUTION for why this is needed.
+export function setBodyRestitution(body, value) {
+  body.restitution = value;
+}
+
 export function setBodyPosition(body, position) {
   Matter.Body.setPosition(body, position);
 }

@@ -25,6 +25,11 @@ import {
   WALL_PUSH_FORCE,
   MARBLE_RADIUS,
   MARBLE_MAX_SPEED,
+  MARBLE_RESTITUTION,
+  SLALOM_BOUNCE_MIN_SPEED,
+  SLALOM_BOUNCE_SIDE_KICK,
+  FUNNEL_RESTITUTION,
+  FUNNEL_ZONE_MARGIN,
   COLORS,
   getThemeShape,
 } from './config.js';
@@ -55,6 +60,7 @@ export class Race {
     this.magnetClock = 0;
     this.windVortices = course.windVortices;
     this.vortexClock = 0;
+    this.funnels = course.funnels;
     this.currentlySlowed = new Set();
     this.windmillGate = this.walls.find((b) => b.label === 'windmillGate');
     physics.addBodies(this.walls);
@@ -89,6 +95,26 @@ export class Race {
         } else if (other.label === 'spinner') {
           const marbleBody = bodyA.label === 'marble' ? bodyA : bodyB;
           particleManager.spawnSpark(marbleBody.position.x, marbleBody.position.y, COLORS.spinner, 10);
+        } else if (other.label === 'slalomPlank') {
+          // A direct velocity kick (same reasoning as the bounce pad above)
+          // rather than trusting restitution alone — a marble sliding down
+          // the plank can hit it at a shallow, mostly-tangential angle with
+          // very little velocity along the surface normal to actually
+          // restitute off of, which is exactly the "sometimes sticks/slides
+          // instead of bouncing" case this guarantees against on every touch.
+          // The sideways component adds a random kick (both size and
+          // direction) on top of whatever drift the marble already had,
+          // instead of just carrying that drift through unchanged — that's
+          // what makes consecutive hits scatter every which way rather than
+          // always continuing in the same direction it was already going.
+          const marbleBody = bodyA.label === 'marble' ? bodyA : bodyB;
+          const vx = marbleBody.velocity.x;
+          const vy = marbleBody.velocity.y;
+          const kickDir = Math.random() < 0.5 ? -1 : 1;
+          physics.setBodyVelocity(marbleBody, {
+            x: vx * 0.5 + kickDir * (SLALOM_BOUNCE_SIDE_KICK + Math.random() * SLALOM_BOUNCE_SIDE_KICK),
+            y: Math.min(-SLALOM_BOUNCE_MIN_SPEED, -Math.abs(vy) * 0.6),
+          });
         } else if (other.label === 'windmillGate') {
           // Rigid and immovable until this exact moment — the first marble
           // to ever touch it is what wakes it up into a real dynamic body
@@ -140,6 +166,7 @@ export class Race {
       this.applyMagnets(m);
       this.applyWindVortices(m);
       this.applyWallPush(m);
+      this.applyFunnelDamping(m);
     });
     // Live 1st/2nd place, recomputed fresh every frame (not cached from the
     // last rank-panel update) — applySlowZones needs to know exactly who's
@@ -382,6 +409,20 @@ export class Race {
     const falloff = 1 - Math.max(distToWall, 0) / WALL_PUSH_MARGIN;
     const direction = offsetFromCenter > 0 ? -1 : 1;
     physics.applyForceToBody(marble.body, { x: direction * WALL_PUSH_FORCE * falloff, y: 0 });
+  }
+
+  // Funnel walls converge at a shallow angle purely to steer marbles into
+  // the narrow gap, not to launch them — but Matter always resolves a
+  // collision's restitution as Math.max(bodyA.restitution, bodyB.restitution),
+  // so the funnel wall's own restitution can never make contact LESS
+  // springy than the marble's own MARBLE_RESTITUTION. Zeroing the marble's
+  // OWN restitution while it's within FUNNEL_ZONE_MARGIN of any funnel's y
+  // (restored the instant it leaves) is the only lever that actually works
+  // given that rule — see config.js's FUNNEL_RESTITUTION.
+  applyFunnelDamping(marble) {
+    const y = marble.body.position.y;
+    const inFunnel = this.funnels.some((f) => Math.abs(y - f.y) <= FUNNEL_ZONE_MARGIN);
+    physics.setBodyRestitution(marble.body, inFunnel ? FUNNEL_RESTITUTION : MARBLE_RESTITUTION);
   }
 
   isFinished() {
