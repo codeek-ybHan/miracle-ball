@@ -335,11 +335,11 @@ function drawMarbles(marbles, dynamicZoom, slowedSet) {
     // Names scale with the base (screen-fit) zoom but stay put during the
     // extra near-goal zoom-in, so they never balloon to an unreadable size.
     ctx.save();
-    ctx.translate(pos.x, pos.y + radius + 6);
+    ctx.translate(pos.x, pos.y + radius + 8);
     ctx.scale(1 / dynamicZoom, 1 / dynamicZoom);
-    ctx.font = '600 12px "Baloo 2", sans-serif';
+    ctx.font = '700 18px "Baloo 2", sans-serif';
     ctx.textAlign = 'center';
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 4;
     ctx.strokeStyle = '#05060f';
     ctx.fillStyle = m.color;
     ctx.strokeText(m.name, 0, 0);
