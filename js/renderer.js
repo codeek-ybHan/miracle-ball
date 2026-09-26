@@ -337,7 +337,7 @@ function drawMarbles(marbles, dynamicZoom, slowedSet) {
     ctx.save();
     ctx.translate(pos.x, pos.y + radius + 8);
     ctx.scale(1 / dynamicZoom, 1 / dynamicZoom);
-    ctx.font = '700 18px "Baloo 2", sans-serif';
+    ctx.font = '700 13px "Baloo 2", sans-serif';
     ctx.textAlign = 'center';
     ctx.lineWidth = 4;
     ctx.strokeStyle = '#05060f';
