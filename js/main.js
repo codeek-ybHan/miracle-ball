@@ -90,9 +90,32 @@ function handleStart() {
 // dead the instant the last one crosses — otherwise the finish-line spark
 // burst and any still-spinning obstacles freeze mid-animation, looking like
 // the game crashed rather than settling into its finished state.
+// TEMP diagnostic instrumentation for the funnel-bounce bug report — logs
+// raw (pre-clamp) rAF delta stats once/sec, and race.js's own debug hook
+// logs any funnel-zone speed anomaly. Both are opt-in via
+// window.__DEBUG__ = true (set from the browser console before starting a
+// race) so there is zero overhead/output when unset. Safe to remove once
+// the bug is diagnosed.
+let __rawDeltas = [];
+let __lastLogAt = 0;
+
 function loop(now) {
-  const delta = Math.min(now - lastTime, 50);
+  const rawDelta = now - lastTime;
+  const delta = Math.min(rawDelta, 50);
   lastTime = now;
+
+  if (window.__DEBUG__) {
+    __rawDeltas.push(rawDelta);
+    if (now - __lastLogAt > 1000) {
+      const n = __rawDeltas.length;
+      const avg = __rawDeltas.reduce((a, b) => a + b, 0) / n;
+      const max = Math.max(...__rawDeltas);
+      const min = Math.min(...__rawDeltas);
+      console.log(`[fps-debug] ${n} frames/s, delta avg=${avg.toFixed(2)}ms min=${min.toFixed(2)} max=${max.toFixed(2)}`);
+      __rawDeltas = [];
+      __lastLogAt = now;
+    }
+  }
 
   race.update(delta);
   renderer.render(race);
