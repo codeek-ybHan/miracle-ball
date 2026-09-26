@@ -160,16 +160,6 @@ export class Race {
   }
 
   update(deltaMs) {
-    // TEMP diagnostic instrumentation for the funnel-bounce bug report —
-    // see main.js's loop() for the __DEBUG__ flag. Snapshots each marble's
-    // position/velocity right before this frame touches physics at all, so
-    // it can be compared against the post-physics state below. Zero cost
-    // when the flag is unset.
-    const __debug = typeof window !== 'undefined' && window.__DEBUG__;
-    const __preState = __debug
-      ? this.marbles.map((m) => ({ x: m.body.position.x, y: m.body.position.y, vx: m.body.velocity.x, vy: m.body.velocity.y }))
-      : null;
-
     this.spinners.forEach((s) => s.update(deltaMs));
     this.magnetClock += deltaMs;
     this.vortexClock += deltaMs;
@@ -205,31 +195,6 @@ export class Race {
       remaining -= dt;
     }
     this.clampSpeeds();
-
-    if (__debug) {
-      this.marbles.forEach((m, i) => {
-        if (m.finished) return;
-        const pre = __preState[i];
-        const inZone = this.isInBounceDampedZone(m);
-        if (!inZone && Math.abs(m.body.position.y - pre.y) > 200) return; // skip finish-line teleports etc.
-        const dx = m.body.position.x - pre.x;
-        const dy = m.body.position.y - pre.y;
-        const jump = Math.hypot(dx, dy);
-        // Flag anything that moved further in one frame than deltaMs *
-        // MARBLE_MAX_SPEED could plausibly explain (generous 2x margin) —
-        // that's the position-jump-before-the-clamp-catches-it signature
-        // this is specifically looking for.
-        const plausibleMax = (deltaMs / (1000 / 60)) * MARBLE_MAX_SPEED * 2;
-        if (jump > plausibleMax || inZone) {
-          console.log(
-            `[funnel-debug] marble=${m.name} inFunnelOrGateZone=${inZone} deltaMs=${deltaMs.toFixed(2)} jump=${jump.toFixed(1)}px ` +
-              `pre=(${pre.x.toFixed(1)},${pre.y.toFixed(1)} v=${pre.vx.toFixed(2)},${pre.vy.toFixed(2)}) ` +
-              `post=(${m.body.position.x.toFixed(1)},${m.body.position.y.toFixed(1)} v=${m.body.velocity.x.toFixed(2)},${m.body.velocity.y.toFixed(2)})`
-          );
-        }
-      });
-    }
-
     particleManager.update(deltaMs);
 
     this.marbles.forEach((m) => {

@@ -155,7 +155,18 @@ export const WINDMILL_GATE_RESTITUTION = 0.3;
 export const WINDMILL_GATE_MAX_ANGULAR_SPEED = 0.07;
 
 export const BUMPER_RADIUS = 22;
-export const BUMPER_RESTITUTION = 2.2;
+// Restitution above 1 is physically impossible — it hands a marble back
+// MORE speed than it arrived with, purely from bouncing off a static body,
+// which is exactly the "not following gravity" feel a real pinball bumper
+// shouldn't have (a real one gets its punch from a solenoid, not from
+// breaking energy conservation). It also compounds badly with
+// MARBLE_MAX_SPEED: at 2.2, almost any real hit instantly maxes out the
+// clamp, so every bumper hit reads as the same canned "TOO FAST" pop
+// instead of a range of hits with real variety. 1.3 keeps bumpers clearly
+// more energetic than anything else in the course (still "chaotic bounces,
+// can undo a lead" — see bumper()'s own comment) without ever adding free
+// energy or flattening every hit to the same speed.
+export const BUMPER_RESTITUTION = 1.3;
 export const BUMPER_FLASH_MS = 150;
 
 // Bounce pad: fires instantly on every single touch. A first attempt at
