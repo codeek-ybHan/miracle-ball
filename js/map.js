@@ -275,15 +275,30 @@ function slalomPlank(y, angle, side, bodies, tiltOutward = false) {
 // Gate row (lane choice): a short line of evenly spaced posts across the
 // tube. Four posts (up from the old three) leaves five narrower lanes
 // instead of four wider ones, so picking a lane actually matters more.
-function gateRow(y, bodies) {
+//
+// Labeled 'gate' rather than lumped in with the plain tube boundary's
+// 'wall' — these posts sit close enough together (the middle lane is under
+// 50px wide, barely 3 marble-diameters) that a marble clipping one at an
+// angle can catch the next post over before it's fully clear of the first,
+// and at the marble's own default restitution that turned into a genuine
+// multi-hit ping-pong between two posts (confirmed by direct simulation:
+// a marble's vx reversing sign, and GAINING magnitude, three times within
+// 6 frames) — exactly the side-to-side "spasm" these posts are supposed to
+// prevent by simply dividing lanes, not by bouncing anyone. Same fix as the
+// funnel walls (see funnelPair's own comment on Matter's restitution
+// max() rule) — `gates`, when passed, collects { y } for this row so
+// race.js's applyFunnelDamping can zero the marble's own restitution while
+// it's near it, restored the instant it's clear.
+function gateRow(y, bodies, gates) {
   [-0.5, -0.17, 0.17, 0.5].forEach((offsetRatio) => {
     bodies.push(
       physics.createRectBody(centerX(y) + offsetRatio * tubeHalfWidthAt(y), y, 14, 80, {
         isStatic: true,
-        label: 'wall',
+        label: 'gate',
       })
     );
   });
+  if (gates) gates.push({ y });
 }
 
 // A rotating spinner/windmill sweeps a full circle of radius = half its
@@ -327,6 +342,7 @@ function createDarkCourse() {
   const magnets = [];
   const windVortices = [];
   const funnels = [];
+  const gates = [];
 
   // Winding tube boundary (replaces straight side walls); its width itself
   // also varies along the way, not just its left-right curve.
@@ -433,7 +449,7 @@ function createDarkCourse() {
 
   // 8. Gate row (lane choice)
   const gateY = 3709 * S;
-  gateRow(gateY, bodies);
+  gateRow(gateY, bodies, gates);
 
   // 8b. Magnet — pulls marbles in toward its center for most of its cycle,
   // then shoves them back out in a short burst, scattering whoever's nearby
@@ -527,7 +543,7 @@ function createDarkCourse() {
 
   bodies.push(...spinners.map((s) => s.body));
 
-  return { bodies, spinners, slowZones, magnets, windVortices, funnels };
+  return { bodies, spinners, slowZones, magnets, windVortices, funnels, gates };
 }
 
 // 네온 사이버's course — a faster, more mechanical/chaotic gauntlet: short
@@ -553,6 +569,7 @@ function createNeonCourse() {
   const magnets = [];
   const windVortices = [];
   const funnels = [];
+  const gates = [];
 
   tubeChain(-1, bodies);
   tubeChain(1, bodies);
@@ -649,7 +666,7 @@ function createNeonCourse() {
   const gateY = gauntlet2LastY + 2126.2; // 6703.2
 
   // 9. Gate row
-  gateRow(gateY, bodies);
+  gateRow(gateY, bodies, gates);
 
   // 10. Magnet — reuses gate->magnet gap (164)
   const magnetY = gateY + 164 * S; // 6932.8
@@ -697,7 +714,7 @@ function createNeonCourse() {
 
   bodies.push(...spinners.map((s) => s.body));
 
-  return { bodies, spinners, slowZones, magnets, windVortices, funnels };
+  return { bodies, spinners, slowZones, magnets, windVortices, funnels, gates };
 }
 
 // 파스텔 캔디's course — a softer, bouncier candy course: one peg field (8
@@ -715,6 +732,7 @@ function createPastelCourse() {
   const magnets = [];
   const windVortices = [];
   const funnels = [];
+  const gates = [];
 
   tubeChain(-1, bodies);
   tubeChain(1, bodies);
@@ -756,7 +774,7 @@ function createPastelCourse() {
 
   // 7. Gate row — reuses pegField->gate(375)
   const gateY = pegField3LastY + 375 * S; // 3409
-  gateRow(gateY, bodies);
+  gateRow(gateY, bodies, gates);
 
   // 7b. Magnet — non-solid, safe anywhere; reuses gate->magnet(164) for
   // pacing consistency only.
@@ -824,5 +842,5 @@ function createPastelCourse() {
 
   bodies.push(...spinners.map((s) => s.body)); // stays empty — fine, race.js handles an empty spinners array / missing windmillGate safely
 
-  return { bodies, spinners, slowZones, magnets, windVortices, funnels };
+  return { bodies, spinners, slowZones, magnets, windVortices, funnels, gates };
 }

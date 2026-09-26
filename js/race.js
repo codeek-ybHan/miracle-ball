@@ -30,6 +30,7 @@ import {
   SLALOM_BOUNCE_SIDE_KICK,
   FUNNEL_RESTITUTION,
   FUNNEL_ZONE_MARGIN,
+  GATE_ZONE_MARGIN,
   COLORS,
   getThemeShape,
 } from './config.js';
@@ -61,6 +62,7 @@ export class Race {
     this.windVortices = course.windVortices;
     this.vortexClock = 0;
     this.funnels = course.funnels;
+    this.gates = course.gates;
     this.currentlySlowed = new Set();
     this.windmillGate = this.walls.find((b) => b.label === 'windmillGate');
     physics.addBodies(this.walls);
@@ -411,18 +413,27 @@ export class Race {
     physics.applyForceToBody(marble.body, { x: direction * WALL_PUSH_FORCE * falloff, y: 0 });
   }
 
-  // Funnel walls converge at a shallow angle purely to steer marbles into
-  // the narrow gap, not to launch them — but Matter always resolves a
-  // collision's restitution as Math.max(bodyA.restitution, bodyB.restitution),
-  // so the funnel wall's own restitution can never make contact LESS
+  // Funnel walls and gate-row posts both steer marbles (into the narrow
+  // gap, or into a lane) rather than launch them — but Matter always
+  // resolves a collision's restitution as
+  // Math.max(bodyA.restitution, bodyB.restitution), so neither the funnel
+  // wall's nor the gate post's own restitution can ever make contact LESS
   // springy than the marble's own MARBLE_RESTITUTION. Zeroing the marble's
-  // OWN restitution while it's within FUNNEL_ZONE_MARGIN of any funnel's y
-  // (restored the instant it leaves) is the only lever that actually works
-  // given that rule — see config.js's FUNNEL_RESTITUTION.
+  // OWN restitution while it's within FUNNEL_ZONE_MARGIN of any funnel's y,
+  // or GATE_ZONE_MARGIN of any gate row's y (restored the instant it
+  // clears both), is the only lever that actually works given that rule —
+  // see config.js's FUNNEL_RESTITUTION. The gate row needed this fix too:
+  // direct simulation found a marble clipping one post at an angle could
+  // catch the next post over before clearing the first, and at the
+  // marble's normal 0.7 restitution that showed up as vx reversing sign —
+  // and GAINING magnitude — three times within 6 frames, i.e. exactly the
+  // side-to-side "spasm" bug, not the clean single deflection a lane
+  // divider should give.
   applyFunnelDamping(marble) {
     const y = marble.body.position.y;
     const inFunnel = this.funnels.some((f) => Math.abs(y - f.y) <= FUNNEL_ZONE_MARGIN);
-    physics.setBodyRestitution(marble.body, inFunnel ? FUNNEL_RESTITUTION : MARBLE_RESTITUTION);
+    const inGate = this.gates.some((g) => Math.abs(y - g.y) <= GATE_ZONE_MARGIN);
+    physics.setBodyRestitution(marble.body, inFunnel || inGate ? FUNNEL_RESTITUTION : MARBLE_RESTITUTION);
   }
 
   isFinished() {

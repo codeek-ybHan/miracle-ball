@@ -114,6 +114,13 @@ export const SLALOM_BOUNCE_SIDE_KICK = 3.5;
 export const FUNNEL_RESTITUTION = 0;
 export const FUNNEL_ZONE_MARGIN = 120;
 
+// Gate-row posts are 80px tall (see map.js's gateRow) — this needs to cover
+// the post's full vertical footprint (40px each way from its center) plus
+// marble radius and a little slop, or a marble could still be caught
+// between two posts right at the edge of the zone where restitution hasn't
+// been zeroed yet (the same reasoning as FUNNEL_ZONE_MARGIN above).
+export const GATE_ZONE_MARGIN = 60;
+
 export const SPINNER_SPEED = 0.7; // rad/sec
 export const SPINNER_LENGTH = 340;
 export const WINDMILL_LENGTH = 380;
