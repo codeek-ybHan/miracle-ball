@@ -31,6 +31,7 @@ import {
   FUNNEL_RESTITUTION,
   FUNNEL_ZONE_MARGIN,
   FUNNEL_MAX_SPEED,
+  FUNNEL_SPEED_CAP_MARGIN,
   GATE_ZONE_MARGIN,
   COLORS,
   getThemeShape,
@@ -224,14 +225,15 @@ export class Race {
   clampSpeeds() {
     this.marbles.forEach((m) => {
       // Checked fresh every call (this runs before AND after every single
-      // physics substep, not just once per rendered frame) rather than
-      // reusing whatever applyFunnelDamping decided this frame — see that
-      // method's comment for why the funnel/gate zone needs a much lower
-      // cap than the rest of the course: it's the only thing that actually
-      // catches the bad velocity Matter's own collision resolution can
-      // produce there, in the same substep it's produced, before gravity
-      // or a render has a chance to carry it anywhere visible.
-      const cap = this.isInBounceDampedZone(m) ? FUNNEL_MAX_SPEED : MARBLE_MAX_SPEED;
+      // physics substep, not just once per rendered frame) — it's the only
+      // thing that actually catches the bad velocity Matter's own collision
+      // resolution can produce right at a funnel/gate, in the same substep
+      // it's produced, before gravity or a render has a chance to carry it
+      // anywhere visible. Deliberately its OWN (much tighter) zone check,
+      // not isInBounceDampedZone's — see FUNNEL_SPEED_CAP_MARGIN's comment
+      // for why reusing that wider, safety-padded zone here was actively
+      // fighting gravity for marbles nowhere near the plank.
+      const cap = this.isInSpeedCapZone(m) ? FUNNEL_MAX_SPEED : MARBLE_MAX_SPEED;
       const v = m.body.velocity;
       const speed = Math.hypot(v.x, v.y);
       if (speed > cap) {
@@ -460,6 +462,18 @@ export class Race {
     const inFunnel = this.funnels.some((f) => Math.abs(y - f.y) <= FUNNEL_ZONE_MARGIN);
     const inGate = this.gates.some((g) => Math.abs(y - g.y) <= GATE_ZONE_MARGIN);
     return inFunnel || inGate;
+  }
+
+  // See config.js's FUNNEL_SPEED_CAP_MARGIN — a deliberately tighter check
+  // than isInBounceDampedZone's, used only by clampSpeeds' active speed
+  // brake. The gate side reuses GATE_ZONE_MARGIN as-is (60, already close
+  // to the posts' own 80px-tall footprint, not padded nearly as wide as
+  // the funnel's 120).
+  isInSpeedCapZone(marble) {
+    const y = marble.body.position.y;
+    const nearFunnelWall = this.funnels.some((f) => Math.abs(y - f.y) <= FUNNEL_SPEED_CAP_MARGIN);
+    const inGate = this.gates.some((g) => Math.abs(y - g.y) <= GATE_ZONE_MARGIN);
+    return nearFunnelWall || inGate;
   }
 
   applyFunnelDamping(marble) {

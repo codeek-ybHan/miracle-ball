@@ -120,6 +120,24 @@ export const FUNNEL_ZONE_MARGIN = 120;
 // worst-case single 16.7ms substep's travel stays a small fraction of that
 // 14px, confirmed by direct simulation to eliminate the launch.
 export const FUNNEL_MAX_SPEED = 6;
+// How close (in y) a marble needs to be to a funnel's OWN plank before
+// race.js's clampSpeeds actually brakes it down to FUNNEL_MAX_SPEED — much
+// tighter than FUNNEL_ZONE_MARGIN (120) on purpose. That wider margin is
+// safe to over-apply for restitution (it only matters at an actual
+// collision, so padding it wide just means "double-check a bit early,"
+// harmless), but this cap is an ACTIVE speed brake applied every single
+// physics substep whether or not the marble is anywhere near the plank.
+// Over the padded 120px zone, a marble just falling straight down the
+// middle of the gap — nowhere near either wall — still had its natural
+// gravity acceleration forcibly capped the entire time, which reads as
+// fighting gravity instead of following it, and repeatedly clamping a
+// marble that's ALSO touching a surface (each substep undoing whatever
+// gravity/friction just added) is exactly what produces a visible rattle
+// in place instead of a clean pass-through. 45 covers the plank's real
+// vertical footprint (~34-40px across the angles in use — see
+// funnelPair's own WALL_OVERLAP-derived geometry) plus marble radius and a
+// little slop, not the full safety-padded zone.
+export const FUNNEL_SPEED_CAP_MARGIN = 55;
 
 // Gate-row posts are 80px tall (see map.js's gateRow) — this needs to cover
 // the post's full vertical footprint (40px each way from its center) plus
