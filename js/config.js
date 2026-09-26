@@ -113,6 +113,13 @@ export const SLALOM_BOUNCE_SIDE_KICK = 3.5;
 // been zeroed yet.
 export const FUNNEL_RESTITUTION = 0;
 export const FUNNEL_ZONE_MARGIN = 120;
+// See race.js's applyFunnelDamping — the funnel plank is only 14px thick,
+// thin enough that a marble arriving at full MARBLE_MAX_SPEED can tunnel
+// partway into it in one physics step, and Matter's own overlap-correction
+// (not restitution) then shoves it back out hard. Capped low enough that a
+// worst-case single 16.7ms substep's travel stays a small fraction of that
+// 14px, confirmed by direct simulation to eliminate the launch.
+export const FUNNEL_MAX_SPEED = 6;
 
 // Gate-row posts are 80px tall (see map.js's gateRow) — this needs to cover
 // the post's full vertical footprint (40px each way from its center) plus

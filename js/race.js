@@ -30,6 +30,7 @@ import {
   SLALOM_BOUNCE_SIDE_KICK,
   FUNNEL_RESTITUTION,
   FUNNEL_ZONE_MARGIN,
+  FUNNEL_MAX_SPEED,
   GATE_ZONE_MARGIN,
   COLORS,
   getThemeShape,
@@ -222,10 +223,19 @@ export class Race {
 
   clampSpeeds() {
     this.marbles.forEach((m) => {
+      // Checked fresh every call (this runs before AND after every single
+      // physics substep, not just once per rendered frame) rather than
+      // reusing whatever applyFunnelDamping decided this frame — see that
+      // method's comment for why the funnel/gate zone needs a much lower
+      // cap than the rest of the course: it's the only thing that actually
+      // catches the bad velocity Matter's own collision resolution can
+      // produce there, in the same substep it's produced, before gravity
+      // or a render has a chance to carry it anywhere visible.
+      const cap = this.isInBounceDampedZone(m) ? FUNNEL_MAX_SPEED : MARBLE_MAX_SPEED;
       const v = m.body.velocity;
       const speed = Math.hypot(v.x, v.y);
-      if (speed > MARBLE_MAX_SPEED) {
-        const scale = MARBLE_MAX_SPEED / speed;
+      if (speed > cap) {
+        const scale = cap / speed;
         physics.setBodyVelocity(m.body, { x: v.x * scale, y: v.y * scale });
       }
     });
@@ -429,11 +439,32 @@ export class Race {
   // and GAINING magnitude — three times within 6 frames, i.e. exactly the
   // side-to-side "spasm" bug, not the clean single deflection a lane
   // divider should give.
-  applyFunnelDamping(marble) {
+  //
+  // This alone doesn't fully kill the funnel's bounce, though — direct
+  // simulation (with realistic, jittery frame deltas, not a clean fixed
+  // timestep) confirmed the marble's own restitution really was 0 at the
+  // exact moment of contact, and yet the marble could still rebound at
+  // full MARBLE_MAX_SPEED with its direction reversed, independent of both
+  // incoming speed and how wide the gap was (tried doubling it — no
+  // change). That rules out restitution AND simple tunneling as the
+  // cause; what's left is Matter's own SAT collision-normal calculation
+  // getting unstable for a circle contacting very close to a long, thin,
+  // rotated rectangle's end — a known category of physics-engine glitch,
+  // not something fixable by tuning restitution or geometry here. See
+  // clampSpeeds() for the actual fix: capping speed specifically inside
+  // this zone, checked fresh every physics substep (not just once per
+  // frame here) so it catches the bad velocity the instant Matter produces
+  // it, before it ever reaches a rendered frame.
+  isInBounceDampedZone(marble) {
     const y = marble.body.position.y;
     const inFunnel = this.funnels.some((f) => Math.abs(y - f.y) <= FUNNEL_ZONE_MARGIN);
     const inGate = this.gates.some((g) => Math.abs(y - g.y) <= GATE_ZONE_MARGIN);
-    physics.setBodyRestitution(marble.body, inFunnel || inGate ? FUNNEL_RESTITUTION : MARBLE_RESTITUTION);
+    return inFunnel || inGate;
+  }
+
+  applyFunnelDamping(marble) {
+    const damped = this.isInBounceDampedZone(marble);
+    physics.setBodyRestitution(marble.body, damped ? FUNNEL_RESTITUTION : MARBLE_RESTITUTION);
   }
 
   isFinished() {
