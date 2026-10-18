@@ -1,5 +1,5 @@
 import * as physics from './physics.js';
-import { Spinner } from './entities/spinner.js';
+import { Spinner, Windmill4 } from './entities/spinner.js';
 import {
   COURSE_WIDTH,
   COURSE_HEIGHT,
@@ -325,6 +325,37 @@ function fittedSpinnerLength(y, desiredLength, offsetRatio) {
   return Math.min(desiredLength, maxHalfLength * 2);
 }
 
+// Final-stretch pinch: both walls ease in from the tube wall down to a
+// single-file lane (smoothstep taper), then run as a constant narrow channel.
+// Built from overlapping short rotated segments like tubeChain so it follows
+// the winding centerline and leaves no corner for a marble to wedge into.
+function narrowChannel(yStart, taperLength, yEnd, gapHalf, bodies) {
+  const step = 20;
+  const wallOffsetAt = (y) => {
+    const t = Math.min(1, Math.max(0, (y - yStart) / taperLength));
+    const k = t * t * (3 - 2 * t);
+    const full = tubeHalfWidthAt(y);
+    return full + (gapHalf + WALL_THICKNESS / 2 - full) * k;
+  };
+  for (const side of [-1, 1]) {
+    const pts = [];
+    for (let y = yStart; y <= yEnd + step; y += step) {
+      pts.push({ x: centerX(y) + side * wallOffsetAt(y), y });
+    }
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      bodies.push(
+        physics.createRectBody((a.x + b.x) / 2, (a.y + b.y) / 2, Math.hypot(b.x - a.x, b.y - a.y) + step * 0.6, WALL_THICKNESS, {
+          isStatic: true,
+          label: 'wall',
+          angle: Math.atan2(b.y - a.y, b.x - a.x),
+        })
+      );
+    }
+  }
+}
+
 export function createCourse(themeId = 'dark') {
   if (themeId === 'neon') return createNeonCourse();
   if (themeId === 'pastel') return createPastelCourse();
@@ -444,8 +475,15 @@ function createDarkCourse() {
   slalomPlank(2629 * S, 0.22, 1, bodies);
   slalomPlank(2739 * S, 0.22, -1, bodies);
 
-  // 7. (Peg field 2 removed — only one peg field left in this course now,
-  // see item 1. Plain open stretch here instead.)
+  // 7. Four-blade windmill — mid-course obstacle, a rotating "+" of four
+  // rectangles. Arm length is fitted to the local tube width so the sweep
+  // never clips a wall.
+  const pinwheelY = 3950; // just after the slalom, where the tube is wide
+  const pinwheelArm = Math.min(
+    260,
+    tubeHalfWidthAt(pinwheelY) - WALL_THICKNESS / 2 - 8
+  );
+  spinners.push(new Windmill4(centerX(pinwheelY), pinwheelY, pinwheelArm, 18, 0.5, COLORS.spinner));
 
   // 8. Gate row (lane choice)
   const gateY = 3709 * S;
@@ -505,8 +543,8 @@ function createDarkCourse() {
   // see item 1. Plain open stretch here instead.)
 
   // 11b. Power bumper arena 3 (extra late-race chaos, extends the course)
-  const bumperArena3Y = 4959 * S;
-  const bumperArena3LastY = 5089 * S;
+  const bumperArena3Y = 4400 * S;
+  const bumperArena3LastY = 4530 * S;
   bumper(bumperArena3Y, -0.52, bodies);
   bumper(bumperArena3Y, 0.52, bodies);
   bumper(bumperArena3LastY, 0, bodies);
@@ -528,6 +566,11 @@ function createDarkCourse() {
   // steepened to 0.32 for the same reason as the bottleneck funnel above —
   // a decisive final pull into the goal instead of a slow crawl to center.
   const finalFunnelY = 5428 * S;
+
+  // 11d. Last-stretch pinch: the track squeezes down to one single-file lane
+  // just before the finish funnel, so the pack has to fight for position.
+  narrowChannel(finalSlowZoneEnd + 30, 450, finalFunnelY - 40, 26, bodies);
+
   funnelPair(finalFunnelY, 0.32, 20, bodies, 0, funnels);
 
   // Floor — thick enough that a marble carrying a lot of speed after the

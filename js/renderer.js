@@ -240,12 +240,15 @@ function drawWindVortices(vortices, bursting) {
 
 function drawSpinners(spinners) {
   spinners.forEach((s) => {
-    pathVertices(s.body);
-    ctx.fillStyle = s.color;
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = s.color === COLORS.windmill ? COLORS.windmillEdge : COLORS.spinnerEdge;
-    ctx.stroke();
+    const parts = s.body.parts.length > 1 ? s.body.parts.slice(1) : [s.body];
+    parts.forEach((part) => {
+      pathVertices(part);
+      ctx.fillStyle = s.color;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = s.color === COLORS.windmill ? COLORS.windmillEdge : COLORS.spinnerEdge;
+      ctx.stroke();
+    });
     ctx.beginPath();
     ctx.arc(s.body.position.x, s.body.position.y, 5, 0, Math.PI * 2);
     ctx.fillStyle = COLORS.background;
