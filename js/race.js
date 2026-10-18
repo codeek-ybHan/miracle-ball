@@ -21,6 +21,7 @@ import {
   BOUNCE_PAD_LAUNCH_SPEED,
   WINDMILL_GATE_MAX_ANGULAR_SPEED,
   SLOW_ZONE_MAX_SPEED,
+  SPEED_ZONE_MAX_SPEED,
   WALL_PUSH_MARGIN,
   WALL_PUSH_FORCE,
   MARBLE_RADIUS,
@@ -58,6 +59,7 @@ export class Race {
     // per-race state tracking how many marbles have fully crossed each zone
     // (see applySlowZones), so a zone burns out after the first 2 balls go
     // through it instead of punishing every leader for the whole race.
+    this.speedZones = course.speedZones ?? [];
     this.slowZones = course.slowZones.map((zone) => ({ ...zone, passedMarbles: new Set(), disabled: false }));
     this.magnets = course.magnets;
     this.magnetClock = 0;
@@ -161,7 +163,8 @@ export class Race {
   }
 
   update(deltaMs) {
-    this.spinners.forEach((s) => s.update(deltaMs));
+    const leadY = this.marbles.reduce((y, m) => Math.max(y, m.body.position.y), -Infinity);
+    this.spinners.forEach((s) => s.update(deltaMs, leadY));
     this.magnetClock += deltaMs;
     this.vortexClock += deltaMs;
     this.marbles.forEach((m) => {
@@ -233,7 +236,11 @@ export class Race {
       // not isInBounceDampedZone's — see FUNNEL_SPEED_CAP_MARGIN's comment
       // for why reusing that wider, safety-padded zone here was actively
       // fighting gravity for marbles nowhere near the plank.
-      const cap = this.isInSpeedCapZone(m) ? FUNNEL_MAX_SPEED : MARBLE_MAX_SPEED;
+      let cap = this.isInSpeedCapZone(m) ? FUNNEL_MAX_SPEED : MARBLE_MAX_SPEED;
+      const my = m.body.position.y;
+      this.speedZones.forEach((z) => {
+        if (my >= z.yStart && my <= z.yEnd) cap = Math.min(cap, z.maxSpeed ?? SPEED_ZONE_MAX_SPEED);
+      });
       const v = m.body.velocity;
       const speed = Math.hypot(v.x, v.y);
       if (speed > cap) {

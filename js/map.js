@@ -227,13 +227,15 @@ function funnelPair(y, angle, innerGap, bodies, overlap = 0, funnels) {
   const offset = innerGapHalf + halfLength * cos;
   const cx = centerX(y);
   bodies.push(
-    physics.createRectBody(cx - offset, y, halfLength * 2, 14, { isStatic: true, label: 'funnelWall', angle })
+    physics.createRectBody(cx - offset, y, halfLength * 2, 14, { isStatic: true, label: 'funnelWall', angle, friction: 0, frictionStatic: 0 })
   );
   bodies.push(
     physics.createRectBody(cx + offset, y, halfLength * 2, 14, {
       isStatic: true,
       label: 'funnelWall',
       angle: -angle,
+      friction: 0,
+      frictionStatic: 0,
     })
   );
   if (funnels) funnels.push({ y });
@@ -374,6 +376,7 @@ function createDarkCourse() {
   const windVortices = [];
   const funnels = [];
   const gates = [];
+  const speedZones = [];
 
   // Winding tube boundary (replaces straight side walls); its width itself
   // also varies along the way, not just its left-right curve.
@@ -470,20 +473,26 @@ function createDarkCourse() {
   // Only the first plank keeps the old outward tilt (see slalomPlank's
   // comment) — the rest tilt inward so marbles weave toward the center
   // instead of sliding into the corner pocket by the tube wall.
-  slalomPlank(2409 * S, 0.22, 1, bodies, true);
-  slalomPlank(2519 * S, 0.22, -1, bodies);
-  slalomPlank(2629 * S, 0.22, 1, bodies);
-  slalomPlank(2739 * S, 0.22, -1, bodies);
+  slalomPlank(2770 * S, 0.22, 1, bodies, true);
+  slalomPlank(2880 * S, 0.22, -1, bodies);
+  slalomPlank(2990 * S, 0.22, 1, bodies);
+  slalomPlank(3100 * S, 0.22, -1, bodies);
 
   // 7. Four-blade windmill — mid-course obstacle, a rotating "+" of four
   // rectangles. Arm length is fitted to the local tube width so the sweep
   // never clips a wall.
-  const pinwheelY = 3950; // just after the slalom, where the tube is wide
+  const pinwheelY = 3560; // widest part of the tube, so the arms can be long
   const pinwheelArm = Math.min(
-    260,
-    tubeHalfWidthAt(pinwheelY) - WALL_THICKNESS / 2 - 8
+    320,
+    // Tips are allowed to poke into the wall band (but not through its outer
+    // face — a marble pinned against the wall could otherwise get squeezed out).
+    tubeHalfWidthAt(pinwheelY) + WALL_THICKNESS / 2 - 6
   );
-  spinners.push(new Windmill4(centerX(pinwheelY), pinwheelY, pinwheelArm, 18, 0.5, COLORS.spinner));
+  spinners.push(new Windmill4(centerX(pinwheelY), pinwheelY, pinwheelArm, 18, 0.6, COLORS.spinner, 0, 4000, pinwheelY - pinwheelArm));
+  // Marbles drift slowly through here so they linger among the blades.
+  speedZones.push({ yStart: pinwheelY - 330, yEnd: pinwheelY + 330, maxSpeed: 9 });
+  // Approach: everyone eases off before reaching the blades.
+  speedZones.push({ yStart: pinwheelY - 700, yEnd: pinwheelY - 330, maxSpeed: 6 });
 
   // 8. Gate row (lane choice)
   const gateY = 3709 * S;
@@ -543,8 +552,8 @@ function createDarkCourse() {
   // see item 1. Plain open stretch here instead.)
 
   // 11b. Power bumper arena 3 (extra late-race chaos, extends the course)
-  const bumperArena3Y = 4400 * S;
-  const bumperArena3LastY = 4530 * S;
+  const bumperArena3Y = 4250 * S;
+  const bumperArena3LastY = 4380 * S;
   bumper(bumperArena3Y, -0.52, bodies);
   bumper(bumperArena3Y, 0.52, bodies);
   bumper(bumperArena3LastY, 0, bodies);
@@ -569,7 +578,9 @@ function createDarkCourse() {
 
   // 11d. Last-stretch pinch: the track squeezes down to one single-file lane
   // just before the finish funnel, so the pack has to fight for position.
-  narrowChannel(finalSlowZoneEnd + 30, 450, finalFunnelY - 40, 26, bodies);
+  narrowChannel(finalSlowZoneEnd + 30, 800, finalFunnelY - 40, 26, bodies);
+  // Everyone (not just the leaders) eases off a bit through the pinch.
+  speedZones.push({ yStart: finalSlowZoneEnd + 30 + 200, yEnd: finalFunnelY - 40 });
 
   funnelPair(finalFunnelY, 0.32, 20, bodies, 0, funnels);
 
@@ -586,7 +597,7 @@ function createDarkCourse() {
 
   bodies.push(...spinners.map((s) => s.body));
 
-  return { bodies, spinners, slowZones, magnets, windVortices, funnels, gates };
+  return { bodies, spinners, slowZones, magnets, windVortices, funnels, gates, speedZones };
 }
 
 // 네온 사이버's course — a faster, more mechanical/chaotic gauntlet: short

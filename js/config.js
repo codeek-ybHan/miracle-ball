@@ -262,6 +262,8 @@ export const WIND_VORTEX_BURST_MS = 320;
 // marble entering at MARBLE_MAX_SPEED only dropped to ~12.5px/frame); this
 // visibly stalls a leader out to a crawl, which reads as far more dramatic.
 export const SLOW_ZONE_MAX_SPEED = 3;
+// Top speed for every marble inside a course's `speedZones` (the final pinch).
+export const SPEED_ZONE_MAX_SPEED = 9;
 
 export const CAMERA_SMOOTH_MS = 340;
 // Camera stays at its base zoom for most of the race and zooms in further
