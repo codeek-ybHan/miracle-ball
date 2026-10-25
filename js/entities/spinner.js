@@ -1,20 +1,56 @@
 import * as physics from '../physics.js';
 
+export const GATE_BAR_CATEGORY = 0x0008;
+
 export class Spinner {
-  constructor(x, y, width, height, speed, color) {
-    this.angle = Math.random() * Math.PI * 2;
+  // `pushMarbles` makes each rotation step count as real motion for Matter
+  // (see physics.setBodyAngle's updateVelocity), so a marble touching the
+  // bar is actually carried/flung by it instead of just being pushed out by
+  // overlap correction.
+  // `gate` (optional, finish bar only) makes the bar act as a catcher:
+  //   holdAngle/holdUntilY — parked at holdAngle (blocking the slot mouth)
+  //     until the lead marble reaches holdUntilY, so the first arrivals can't
+  //     slip past a bar that happened to start rotated out of the way. After
+  //     that it turns at a constant `speed`.
+  //   hub/centerOffset — the bar turns around `hub`, not its own middle: the
+  //     body's center sits centerOffset along the bar from the hub, so one arm
+  //     is longer than the other (length/2 + centerOffset vs length/2 - it).
+  constructor(x, y, width, height, speed, color, pushMarbles = false, gate = null) {
+    this.pushMarbles = pushMarbles;
+    this.gate = gate;
+    this.released = !gate;
+    this.angle = gate ? gate.holdAngle : Math.random() * Math.PI * 2;
     this.speed = speed; // rad/sec, sign gives direction
     this.color = color;
+    if (gate) {
+      x = gate.hub.x + Math.cos(this.angle) * gate.centerOffset;
+      y = gate.hub.y + Math.sin(this.angle) * gate.centerOffset;
+    }
     this.body = physics.createRectBody(x, y, width, height, {
       isStatic: true,
       label: 'spinner',
       angle: this.angle,
+      // Own category so race.js can let a marble that's been caught too long
+      // slip through the bar alone (see FINISH.maxCatchMs).
+      ...(gate ? { collisionFilter: { category: GATE_BAR_CATEGORY, mask: 0xffffffff } } : {}),
     });
   }
 
-  update(deltaMs) {
+  update(deltaMs, leadY = -Infinity) {
+    if (!this.released) {
+      if (leadY < this.gate.holdUntilY) return;
+      this.released = true;
+    }
     this.angle += this.speed * (deltaMs / 1000);
-    physics.setBodyAngle(this.body, this.angle);
+    if (this.gate) {
+      const { hub, centerOffset } = this.gate;
+      physics.setBodyPosition(
+        this.body,
+        { x: hub.x + Math.cos(this.angle) * centerOffset, y: hub.y + Math.sin(this.angle) * centerOffset },
+        this.pushMarbles
+      );
+    }
+    physics.setBodyAngle(this.body, this.angle, this.pushMarbles);
   }
 }
 

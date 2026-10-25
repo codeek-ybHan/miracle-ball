@@ -9,7 +9,7 @@ import {
 } from '../config.js';
 
 export class Marble {
-  constructor(name, index, total, spawnCenterX, spawnHalfWidth, shape = 'circle') {
+  constructor(name, index, total, spawnCenterX, spawnHalfWidth, shape = 'circle', pour = false) {
     this.name = name;
     this.hue = Math.round((index / Math.max(total, 1)) * 360);
     this.color = `hsl(${this.hue}, 85%, 60%)`;
@@ -36,9 +36,22 @@ export class Marble {
     const slot = total > 1 ? (index + 0.5) / total : 0.5;
     const jitterRange = (usableWidth / Math.max(total, 1)) * 0.4;
     const spawnX = spawnCenterX - usableHalfWidth + slot * usableWidth + (Math.random() * 2 - 1) * jitterRange;
-    const spawnY = 10 + Math.random() * 60;
-
-    this.body = physics.createMarbleBody(shape, spawnX, spawnY, MARBLE_RADIUS, {
+    let spawnY = 10 + Math.random() * 60;
+    let spawnXFinal = spawnX;
+    if (pour) {
+      // lazygyu/roulette's start: marbles stand in rows of 10, 0.6 units
+      // apart (1 unit = 32px = 4 radii), the first row at y = rows units, each
+      // row below it one unit nearer the top — a tight block that spills
+      // down the chute together. They collide with each other, so it
+      // really does tumble out as a crowd.
+      const unit = 4 * MARBLE_RADIUS;
+      const rows = Math.ceil(total / 10);
+      const line = Math.floor(index / 10);
+      const lineDelta = -Math.max(0, rows - 5);
+      spawnXFinal = spawnCenterX + (-2.625 + (index % 10) * 0.6) * unit;
+      spawnY = (rows - line + lineDelta) * unit;
+    }
+    this.body = physics.createMarbleBody(shape, spawnXFinal, spawnY, MARBLE_RADIUS, {
       restitution: MARBLE_RESTITUTION,
       friction: MARBLE_FRICTION,
       // Matter.js defaults frictionStatic to 0.5 regardless of `friction`
@@ -53,12 +66,12 @@ export class Marble {
       frictionStatic: MARBLE_FRICTION,
       frictionAir: MARBLE_FRICTION_AIR,
       label: 'marble',
-      // Marbles never collide with each other (only with walls/obstacles):
-      // without this, a crowd resting together past the finish line for a
-      // long time slowly destabilizes under Matter.js's contact resolution
-      // and can launch one at extreme velocity, and even short of that they
-      // can physically wall off the goal line for whoever's still racing.
-      collisionFilter: { group: -1 },
+      collisionFilter: { category: 0x0002, mask: 0xffffffff },
+      // Marbles DO collide with each other (like lazygyu/roulette) — they
+      // jostle for position in the chute and pile up against bars. Once a
+      // marble crosses the goal it stops colliding with the others (see
+      // race.js), so a finished crowd can't wall off the goal line for
+      // whoever is still racing or destabilise into a launched marble.
     });
   }
 

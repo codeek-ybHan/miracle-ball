@@ -44,10 +44,22 @@ export const TUBE_WIDTH_PERIOD = 2000 * S; // px per full narrow-wide cycle
 export const WAVE_AMPLITUDE = 110;
 export const WAVE_PERIOD = 1000 * S; // px per full left-right cycle
 
-export const GRAVITY_Y = 0.9;
+export const GRAVITY_Y = 0.45;
+
+// Finish slot + spinning bar (dark theme; see map.js's 11d). Sizes are in
+// lazygyu/roulette's marble-radius units (1 unit = 32px here). Kept in one
+// mutable object so the whole finish can be retuned from one place.
+export const FINISH = {
+  unit: 32,
+  slotWidth: 0.9, // back to the original width — the wider slot made the finale a walk-through
+  barSpeed: -1.2, // rad/s, original speed restored
+  // A marble caught by the bar longer than this (counted from when it gets
+  // near the slot) passes through the bar, so the finale can't drag on.
+  maxCatchMs: 15000,
+};
 
 export const MARBLE_RADIUS = 8;
-export const MARBLE_RESTITUTION = 0.7;
+export const MARBLE_RESTITUTION = 0.8;
 export const MARBLE_FRICTION = 0.02;
 export const MARBLE_FRICTION_AIR = 0.008;
 // Hard speed cap applied every frame. Without it, a marble that chains
@@ -61,7 +73,7 @@ export const MARBLE_FRICTION_AIR = 0.008;
 // and still let a marble through even against the old WALL_THICKNESS (12).
 // See WALL_THICKNESS's own comment for the shallow-angle-hit case that
 // forced that constant up too, on top of this cap.
-export const MARBLE_MAX_SPEED = 14;
+export const MARBLE_MAX_SPEED = 12;
 // Small continuous random sideways nudge so marbles on near-identical paths
 // still diverge over a long fall (also breaks perfectly symmetric traps).
 export const JITTER_FORCE = 0.00018;
@@ -205,7 +217,7 @@ export const BOUNCE_PAD_FLASH_MS = 160;
 // out to a ~349px bounce in practice, taller than it needed to be. 11 gives
 // a still-dramatic ~234px pop with real margin to spare under the 500px gap
 // to the wind vortex above.
-export const BOUNCE_PAD_LAUNCH_SPEED = 11;
+export const BOUNCE_PAD_LAUNCH_SPEED = 8.5;
 
 // Purely visual: the mat itself is drawn as a curved shape (not the raw
 // rigid rectangle body) that plays a real trampoline's sink-then-spring

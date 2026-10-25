@@ -250,7 +250,9 @@ function drawSpinners(spinners) {
       ctx.stroke();
     });
     ctx.beginPath();
-    ctx.arc(s.body.position.x, s.body.position.y, 5, 0, Math.PI * 2);
+    // The gate bar turns around its hub, not its body center.
+    const pivot = s.gate ? s.gate.hub : s.body.position;
+    ctx.arc(pivot.x, pivot.y, 5, 0, Math.PI * 2);
     ctx.fillStyle = COLORS.background;
     ctx.fill();
   });

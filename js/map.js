@@ -1,5 +1,5 @@
 import * as physics from './physics.js';
-import { Spinner, Windmill4 } from './entities/spinner.js';
+import { Spinner } from './entities/spinner.js';
 import {
   COURSE_WIDTH,
   COURSE_HEIGHT,
@@ -24,6 +24,7 @@ import {
   BOUNCE_PAD_RESTITUTION,
   BOUNCE_PAD_FRICTION,
   COLORS,
+  FINISH,
 } from './config.js';
 
 // The track's centerline snakes left/right as it descends, like a winding tube.
@@ -38,7 +39,7 @@ export function tubeHalfWidthAt(y) {
   return TUBE_HALF_WIDTH + TUBE_WIDTH_VARIATION * Math.sin((y / TUBE_WIDTH_PERIOD) * Math.PI * 2);
 }
 
-function tubeChain(side, bodies) {
+function tubeChain(side, bodies, yStart = 0) {
   // Sampling resolution is tied to WAVE_PERIOD (28 samples/cycle, matching
   // the original 1400/50 ratio) rather than a fixed pixel step — since
   // WAVE_PERIOD scales with S, this keeps both curve smoothness (safe wall
@@ -50,7 +51,7 @@ function tubeChain(side, bodies) {
   // whether a fast marble can skip clean through a thin wall in one step.
   const sampleStep = WAVE_PERIOD / 28;
   const points = [];
-  for (let y = 0; y <= COURSE_HEIGHT; y += sampleStep) {
+  for (let y = yStart; y <= COURSE_HEIGHT; y += sampleStep) {
     points.push({ x: centerX(y) + side * tubeHalfWidthAt(y), y });
   }
   // Each segment is a separate straight rotated rectangle, and consecutive
@@ -97,6 +98,75 @@ function tubeChain(side, bodies) {
 // wall, LESS than a marble's 16px diameter, wedging marbles right there.
 // Same fix as fittedSpinnerLength: measure from the real wall face, not the
 // ideal curve.
+// A wall that follows an arbitrary polyline (like tubeChain, but for
+// hand-placed shapes): overlapping short rotated rectangles, each pushed a
+// little past its own endpoints so no wedge-shaped blind spot is left at a
+// joint.
+function polylineWall(points, bodies) {
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    bodies.push(
+      physics.createRectBody((a.x + b.x) / 2, (a.y + b.y) / 2, Math.hypot(dx, dy) + WALL_THICKNESS, WALL_THICKNESS, {
+        isStatic: true,
+        label: 'wall',
+        angle: Math.atan2(dy, dx),
+      })
+    );
+  }
+}
+
+// Opening of the dark course, copied from lazygyu/roulette's 'Wheel of
+// fortune' map (src/data/maps.ts; 1 unit = 32px = 4 marble radii here, as in
+// createDarkCourse's finish): a straight chute the pack starts in, an
+// S-bend that slides left then back right through a pocket, then a short
+// run with six little diamond pegs before it opens out into the regular
+// winding tube at JOIN_Y. Points are [x, y] in those units, x measured from
+// the chute's centerline.
+const INTRO_UNIT = 32;
+const INTRO_JOIN_Y = 1230;
+const INTRO_TOP_Y = -400; // chute reaches well above the spawn rows
+const INTRO_LEFT = [[-3.625, 8.5], [-10.875, 19.25], [-10.875, 26], [-3.125, 30], [-3.125, 33.5]];
+const INTRO_RIGHT = [[3.625, 9.25], [-3.375, 20], [-3.375, 22.5], [4.625, 26], [4.625, 33.5]];
+const INTRO_DIAMONDS_X = [-0.375, 2.625];
+const INTRO_DIAMONDS_Y = [28, 30, 32];
+
+function createIntro(bodies) {
+  const cx = centerX(0);
+  // The original walls are infinitely thin lines; ours are WALL_THICKNESS
+  // thick and centred on their line, so shift each outward by half of that
+  // to keep the open passage the same width.
+  const half = WALL_THICKNESS / 2;
+  const toPx = (side) => ([ux, uy]) => ({ x: cx + ux * INTRO_UNIT + side * half, y: uy * INTRO_UNIT });
+  const joinY = INTRO_JOIN_Y;
+  const left = [
+    { x: cx - 3.625 * INTRO_UNIT - half, y: INTRO_TOP_Y },
+    ...INTRO_LEFT.map(toPx(-1)),
+    { x: centerX(joinY) - tubeHalfWidthAt(joinY), y: joinY },
+  ];
+  const right = [
+    { x: cx + 3.625 * INTRO_UNIT + half, y: INTRO_TOP_Y },
+    ...INTRO_RIGHT.map(toPx(1)),
+    { x: centerX(joinY) + tubeHalfWidthAt(joinY), y: joinY },
+  ];
+  polylineWall(left, bodies);
+  polylineWall(right, bodies);
+  INTRO_DIAMONDS_X.forEach((ux) => {
+    INTRO_DIAMONDS_Y.forEach((uy) => {
+      bodies.push(
+        physics.createRectBody(cx + ux * INTRO_UNIT, uy * INTRO_UNIT, 0.4 * INTRO_UNIT, 0.4 * INTRO_UNIT, {
+          isStatic: true,
+          label: 'wall',
+          angle: Math.PI / 4,
+        })
+      );
+    });
+  });
+  return { joinY, spawnCenterX: cx };
+}
+
 function pegSpacingAt(y, count) {
   const margin = 42;
   const half = tubeHalfWidthAt(y) - WALL_THICKNESS / 2;
@@ -239,6 +309,9 @@ function funnelPair(y, angle, innerGap, bodies, overlap = 0, funnels) {
     })
   );
   if (funnels) funnels.push({ y });
+  // y of the planks' inner tips: a tilted plank pivots about its own centre,
+  // so its inner end sits halfLength*sin(angle) BELOW the nominal y.
+  return y + halfLength * Math.sin(angle);
 }
 
 // A single tilted plank that stops well short of the tube wall (a real open
@@ -327,35 +400,25 @@ function fittedSpinnerLength(y, desiredLength, offsetRatio) {
   return Math.min(desiredLength, maxHalfLength * 2);
 }
 
-// Final-stretch pinch: both walls ease in from the tube wall down to a
-// single-file lane (smoothstep taper), then run as a constant narrow channel.
-// Built from overlapping short rotated segments like tubeChain so it follows
-// the winding centerline and leaves no corner for a marble to wedge into.
-function narrowChannel(yStart, taperLength, yEnd, gapHalf, bodies) {
-  const step = 20;
-  const wallOffsetAt = (y) => {
-    const t = Math.min(1, Math.max(0, (y - yStart) / taperLength));
-    const k = t * t * (3 - 2 * t);
-    const full = tubeHalfWidthAt(y);
-    return full + (gapHalf + WALL_THICKNESS / 2 - full) * k;
-  };
-  for (const side of [-1, 1]) {
-    const pts = [];
-    for (let y = yStart; y <= yEnd + step; y += step) {
-      pts.push({ x: centerX(y) + side * wallOffsetAt(y), y });
-    }
-    for (let i = 0; i < pts.length - 1; i++) {
-      const a = pts[i];
-      const b = pts[i + 1];
-      bodies.push(
-        physics.createRectBody((a.x + b.x) / 2, (a.y + b.y) / 2, Math.hypot(b.x - a.x, b.y - a.y) + step * 0.6, WALL_THICKNESS, {
-          isStatic: true,
-          label: 'wall',
-          angle: Math.atan2(b.y - a.y, b.x - a.x),
-        })
-      );
-    }
-  }
+// fittedSpinnerLength keeps >= 20px between the trapdoor's tips and the wall
+// (so its rotation can't clip the wall) — wider than a marble's 16px
+// diameter, so marbles drop through that gap on either side of the closed
+// door. Plug it with a static ledge from each wall in to 3px past the door's
+// tip. The ledge sits entirely outside the circle the tips sweep (radius =
+// half length), so it never touches the door as it tips open.
+function windmillSideLedges(y, doorLength, bodies) {
+  const half = tubeHalfWidthAt(y) - WALL_THICKNESS / 2;
+  const innerEdge = doorLength / 2 + 3;
+  const width = half - innerEdge + 6; // +6: buried into the wall, no seam
+  if (width <= 0) return;
+  [-1, 1].forEach((side) => {
+    bodies.push(
+      physics.createRectBody(centerX(y) + side * (innerEdge + width / 2), y, width, 16, {
+        isStatic: true,
+        label: 'wall',
+      })
+    );
+  });
 }
 
 export function createCourse(themeId = 'dark') {
@@ -380,25 +443,17 @@ function createDarkCourse() {
 
   // Winding tube boundary (replaces straight side walls); its width itself
   // also varies along the way, not just its left-right curve.
-  tubeChain(-1, bodies);
-  tubeChain(1, bodies);
+  const intro = createIntro(bodies);
+  tubeChain(-1, bodies, intro.joinY);
+  tubeChain(1, bodies, intro.joinY);
 
-  // 1. Peg field
-  pegField(150 * S, 55 * S, 7, 5, bodies);
+  // 1. (Opening peg field moved to mid-course — see 6a below — so the start
+  // is a clear drop and the pack pours down together instead of being
+  // scattered by pegs straight away.)
 
-  // 2. Narrowing bottleneck funnel — tight enough that marbles have to
-  // queue single-file, jostling for who gets through first. Angle steepened
-  // from 0.15 to 0.30 — the gravity component that actually pulls a marble
-  // IN toward the gap is g*sin(angle), so the old shallow angle barely
-  // pulled at all and a marble landing off-center could take well over a
-  // second just crawling sideways (confirmed by direct simulation). A
-  // steeper wall gets it there in a fraction of that.
-  funnelPair(600 * S, 0.3, 20, bodies, 0, funnels);
+  // 2. (Opening bottleneck funnel removed — the intro's S-bend does that job.)
 
-  // 3. Power bumper arena 1 (chaotic bounces, can undo a lead)
-  bumper(800 * S, -0.52, bodies);
-  bumper(800 * S, 0.52, bodies);
-  bumper(920 * S, 0, bodies);
+  // 3. (Opening bumper arena moved to mid-course — see 6b below.)
 
   // 4. Spinner gauntlet — mounted less off-center (0.22 instead of 0.32) than
   // you might expect for a "long" spinner, because fittedSpinnerLength() caps
@@ -449,18 +504,9 @@ function createDarkCourse() {
   const bouncePadY = vortexY + 500;
   bouncePad(bouncePadY, bodies, vortexX);
 
-  // 5c. Slow zone: caps the fall speed of whoever is CURRENTLY in 1st or
-  // 2nd place while they're inside it (checked live, not a blanket effect
-  // on anyone passing through — see race.js's applySlowZones), so it's a
-  // real rubber-band rather than something the whole field feels equally.
-  // Starts a generous 220px after the bounce pad (not overlapping it).
-  // Length shortened from 210*S to 120*S — at SLOW_ZONE_MAX_SPEED (3px/f)
-  // the old length stalled a leader for nearly 100 frames (~1.6s), longer
-  // than felt good.
-  const slowZoneStart = bouncePadY + 220;
-  slowZones.push({ yStart: slowZoneStart, yEnd: slowZoneStart + 120 * S });
+  // 5c. (First slow zone removed.)
 
-  // 6. Zigzag slalom — 4 planks, with a wide 160px gap above the first one
+  // 6. Zigzag slalom — 2 planks (was 4), with a wide 160px gap above the first one
   // so it reads as clearly separate from the slow zone rather than crowding
   // right up against it.
   //
@@ -473,26 +519,25 @@ function createDarkCourse() {
   // Only the first plank keeps the old outward tilt (see slalomPlank's
   // comment) — the rest tilt inward so marbles weave toward the center
   // instead of sliding into the corner pocket by the tube wall.
-  slalomPlank(2770 * S, 0.22, 1, bodies, true);
-  slalomPlank(2880 * S, 0.22, -1, bodies);
-  slalomPlank(2990 * S, 0.22, 1, bodies);
-  slalomPlank(3100 * S, 0.22, -1, bodies);
+  slalomPlank(2770 * S, 0.18, 1, bodies, true);
+  slalomPlank(2880 * S, 0.18, -1, bodies);
 
-  // 7. Four-blade windmill — mid-course obstacle, a rotating "+" of four
-  // rectangles. Arm length is fitted to the local tube width so the sweep
-  // never clips a wall.
-  const pinwheelY = 3560; // widest part of the tube, so the arms can be long
-  const pinwheelArm = Math.min(
-    320,
-    // Tips are allowed to poke into the wall band (but not through its outer
-    // face — a marble pinned against the wall could otherwise get squeezed out).
-    tubeHalfWidthAt(pinwheelY) + WALL_THICKNESS / 2 - 6
-  );
-  spinners.push(new Windmill4(centerX(pinwheelY), pinwheelY, pinwheelArm, 18, 0.6, COLORS.spinner, 0, 4000, pinwheelY - pinwheelArm));
-  // Marbles drift slowly through here so they linger among the blades.
-  speedZones.push({ yStart: pinwheelY - 330, yEnd: pinwheelY + 330, maxSpeed: 9 });
-  // Approach: everyone eases off before reaching the blades.
-  speedZones.push({ yStart: pinwheelY - 700, yEnd: pinwheelY - 330, maxSpeed: 6 });
+  // 6a. Peg field, moved here from the opening. Needs a WIDE stretch of tube
+  // (the tube breathes between ~135 and ~245 half-width, widest at y=3500):
+  // in a narrow stretch the peg gaps shrink below a marble's diameter and
+  // marbles end up resting on top of the pegs. Sits between the bounce pad
+  // (2698) and the first slalom plank (3878).
+  pegField(3200, 55 * S, 7, 5, bodies);
+
+  // 6b. Bumper arena, moved here from the opening: the open stretch after the
+  // last slalom plank (4340) and before the gate row (5192). Bumpers only need
+  // ~110px between them, so they fit this narrower stretch fine.
+  const bumperMidY = 4520;
+  bumper(bumperMidY, -0.52, bodies);
+  bumper(bumperMidY, 0.52, bodies);
+  bumper(bumperMidY + 168, 0, bodies);
+
+  // 7. (Four-blade windmill removed — plain open stretch here instead.)
 
   // 8. Gate row (lane choice)
   const gateY = 3709 * S;
@@ -543,6 +588,7 @@ function createDarkCourse() {
   );
   windmillBody.plugin = { activated: false, pivot: windmillPivot };
   bodies.push(windmillBody);
+  windmillSideLedges(windmillY, fittedSpinnerLength(windmillY, WINDMILL_LENGTH, 0), bodies);
   spinners.push({ body: windmillBody, color: COLORS.windmill, update() {} });
 
   // 10. (Power bumper arena 2 removed — arena 1 and arena 3 stay, plain open
@@ -558,14 +604,7 @@ function createDarkCourse() {
   bumper(bumperArena3Y, 0.52, bodies);
   bumper(bumperArena3LastY, 0, bodies);
 
-  // 11c'. Second slow zone — the same rank-targeted rubber-band as section
-  // 5c, but late in the course instead of mid-course, so whoever's leading
-  // this late isn't safe until they're actually across the line. Given the
-  // same generous margin above (100px clear of bumper arena 3, up from the
-  // old 15px) as the first slow zone.
-  const finalSlowZoneStart = bumperArena3LastY + BUMPER_RADIUS + 100;
-  const finalSlowZoneEnd = finalSlowZoneStart + 100;
-  slowZones.push({ yStart: finalSlowZoneStart, yEnd: finalSlowZoneEnd });
+  // 11c'. (Second slow zone removed.)
 
   // (Peg field 4, the last deflection field before the run-in, was removed
   // — this is now a plain open stretch straight into the final funnel.)
@@ -576,13 +615,74 @@ function createDarkCourse() {
   // a decisive final pull into the goal instead of a slow crawl to center.
   const finalFunnelY = 5428 * S;
 
-  // 11d. Last-stretch pinch: the track squeezes down to one single-file lane
-  // just before the finish funnel, so the pack has to fight for position.
-  narrowChannel(finalSlowZoneEnd + 30, 800, finalFunnelY - 40, 26, bodies);
-  // Everyone (not just the leaders) eases off a bit through the pinch.
-  speedZones.push({ yStart: finalSlowZoneEnd + 30 + 200, yEnd: finalFunnelY - 40 });
+  // 11d. Finish: a steep V funnel into a short vertical slot, with one long
+  // bar spinning at the slot's mouth — same layout as lazygyu/roulette's
+  // 'Wheel of fortune' finish (its funnel/slot/bar numbers are in marble
+  // radii, scaled here by MARBLE_RADIUS/0.25 = 32px per unit): slot 0.9 wide
+  // (~1.8 marble diameters), 5 long; bar half-length 2 (so 4 long), 0.2
+  // thick, turning at -1.2 rad/s, its hub 1.1 left of the slot's left edge
+  // and buried in the funnel wall — so what you see is the bar sweeping out
+  // of the wall across the slot mouth, lifting and flinging whoever is
+  // sitting on it instead of letting the pack just drop through.
+  // Everyone eases off a bit on the way in.
+  speedZones.push({ yStart: finalFunnelY - 500, yEnd: finalFunnelY - 120 });
 
-  funnelPair(finalFunnelY, 0.32, 20, bodies, 0, funnels);
+  const UNIT = FINISH.unit;
+  const slotGap = FINISH.slotWidth * UNIT;
+  const funnelAngle = 0.6;
+  // The funnel's nominal y is where its planks' CENTRES sit; the inner tips
+  // (the actual throat) hang lower by halfLength*sin(angle). Back the nominal
+  // y off by that drop so the throat lands at finalFunnelY itself, where
+  // GOAL_Y/COURSE_HEIGHT expect it (computed against the planks' real reach
+  // at that y, then verified against funnelPair's own returned tip y below).
+  // The plank tips are 14px thick and cut square, so each one's lower corner
+  // overhangs the nominal tip x by ~7*sin(angle) = 4px toward the slot;
+  // spacing the tips 8px wider than the slot cancels that out, leaving the
+  // real throat exactly slot-wide with no ledge for a marble to sit on.
+  const tipGap = slotGap + 8;
+  const outerReach = tubeHalfWidthAt(finalFunnelY) + 60;
+  const drop = ((outerReach - tipGap / 2) / (2 * Math.cos(funnelAngle))) * Math.sin(funnelAngle);
+  const funnelY = finalFunnelY - drop;
+  // funnelPair centres itself on centerX(funnelY), so the slot/bar must use
+  // that same x (the tube's centerline drifts ~25px between the two y's).
+  const slotX = centerX(funnelY);
+  const throatY = funnelPair(funnelY, funnelAngle, tipGap, bodies, 0, funnels);
+  // Vertical slot (straight down regardless of the tube's own drift, like the
+  // original) from the throat down to the floor's top face.
+  const slotBottom = COURSE_HEIGHT - 60 - 75;
+  const slotTop = throatY + 2; // starts just under the planks' tips — any higher and it pokes above the plank surface as a ledge
+  const slotLen = slotBottom - slotTop;
+  [-1, 1].forEach((side) => {
+    bodies.push(
+      physics.createRectBody(slotX + side * (slotGap / 2 + 7), slotTop + slotLen / 2, 14, slotLen, {
+        isStatic: true,
+        label: 'wall',
+        friction: 0,
+        frictionStatic: 0,
+      })
+    );
+  });
+  const barHubX = slotX - slotGap / 2 - 1.1 * UNIT;
+  // Bar half-length 2.5 units: the hub sits 1.1 left of the slot's left edge
+  // and the slot is 1.2 wide, so a reach of 2.5 sweeps clear across the whole
+  // mouth (needs >= 2.3). Every marble has to get past the bar to enter.
+  // Parked sloping down toward the slot (0.4 rad) until the lead marble is
+  // 90px above the throat, then it sweeps up through horizontal at a constant
+  // speed and lifts whoever landed on it, like the reference video.
+  // Thickness ~0.6 marble diameter, as in the reference. The arms are uneven:
+  // long arm 4 units from the hub (the mouth needs >= 2.3 to be fully
+  // covered), short arm 2.4 units — so the bar's middle is offset 0.8 unit
+  // from the hub (the renderer draws the axis dot at the hub, not the middle).
+  const BAR_LONG = 4 * UNIT;
+  const BAR_SHORT = 2.4 * UNIT;
+  spinners.push(
+    new Spinner(barHubX, throatY, BAR_LONG + BAR_SHORT, 0.35 * UNIT, FINISH.barSpeed, COLORS.spinner, true, {
+      holdAngle: 0.4,
+      holdUntilY: throatY - 90,
+      hub: { x: barHubX, y: throatY },
+      centerOffset: (BAR_LONG - BAR_SHORT) / 2,
+    })
+  );
 
   // Floor — thick enough that a marble carrying a lot of speed after the
   // full drop (or a late bumper fling) can't tunnel straight through a
@@ -597,7 +697,18 @@ function createDarkCourse() {
 
   bodies.push(...spinners.map((s) => s.body));
 
-  return { bodies, spinners, slowZones, magnets, windVortices, funnels, gates, speedZones };
+  return {
+    bodies,
+    spinners,
+    slowZones,
+    magnets,
+    windVortices,
+    funnels,
+    gates,
+    speedZones,
+    introEndY: intro.joinY,
+    spawnCenterX: intro.spawnCenterX,
+  };
 }
 
 // 네온 사이버's course — a faster, more mechanical/chaotic gauntlet: short
@@ -746,6 +857,7 @@ function createNeonCourse() {
   );
   windmillBody.plugin = { activated: false, pivot: windmillPivot };
   bodies.push(windmillBody);
+  windmillSideLedges(windmillY, fittedSpinnerLength(windmillY, WINDMILL_LENGTH, 0), bodies);
   spinners.push({ body: windmillBody, color: COLORS.windmill, update() {} });
 
   // 12. (Short outro peg field removed — plain open stretch straight into

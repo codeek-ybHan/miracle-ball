@@ -60,8 +60,11 @@ export function setBodyAngularVelocity(body, value) {
   Matter.Body.setAngularVelocity(body, value);
 }
 
-export function setBodyAngle(body, angle) {
-  Matter.Body.setAngle(body, angle);
+// updateVelocity makes Matter treat the move as real motion (a static body
+// moved this way pushes marbles with an actual relative velocity instead of
+// just teleporting into them and relying on overlap correction).
+export function setBodyAngle(body, angle, updateVelocity = false) {
+  Matter.Body.setAngle(body, angle, updateVelocity);
 }
 
 export function setBodyVelocity(body, velocity) {
@@ -78,8 +81,8 @@ export function setBodyRestitution(body, value) {
   body.restitution = value;
 }
 
-export function setBodyPosition(body, position) {
-  Matter.Body.setPosition(body, position);
+export function setBodyPosition(body, position, updateVelocity = false) {
+  Matter.Body.setPosition(body, position, updateVelocity);
 }
 
 export function applyForceToBody(body, force) {

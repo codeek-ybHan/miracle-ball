@@ -17,6 +17,12 @@ const target = { x: COURSE_WIDTH / 2, y: 0 };
 let baseZoom = 1;
 let zoom = 1;
 let targetZoom = 1;
+// Leader's velocity in world px/ms, low-pass filtered so a bounce off a peg
+// doesn't whip the camera around — see update()'s feed-forward.
+const velocity = { x: 0, y: 0 };
+const rawVelocity = { x: 0, y: 0 };
+const VELOCITY_SMOOTH_MS = 150;
+const MS_PER_STEP = 1000 / 60;
 
 // Picks how large the world renders so the tube fills most of the real
 // window width, regardless of the window's size — called once when a race
@@ -27,9 +33,12 @@ export function configureBaseZoom() {
   baseZoom = Math.min(CAMERA_BASE_MAX, Math.max(CAMERA_BASE_MIN, fit));
 }
 
-export function follow(x, y) {
+// vx/vy are the followed body's Matter velocity (px per 60fps step).
+export function follow(x, y, vx = 0, vy = 0) {
   target.x = x;
   target.y = y;
+  rawVelocity.x = vx / MS_PER_STEP;
+  rawVelocity.y = vy / MS_PER_STEP;
 
   const goalDist = Math.abs(GOAL_Y - y);
   targetZoom = Math.max(1, Math.min(CAMERA_MAX_ZOOM, (1 - goalDist / CAMERA_ZOOM_THRESHOLD) * CAMERA_MAX_ZOOM));
@@ -37,8 +46,19 @@ export function follow(x, y) {
 
 export function update(deltaMs) {
   const factor = 1 - Math.pow(0.5, deltaMs / CAMERA_SMOOTH_MS);
-  position.x += (target.x - position.x) * factor;
-  position.y += (target.y - position.y) * factor;
+  const velFactor = 1 - Math.pow(0.5, deltaMs / VELOCITY_SMOOTH_MS);
+  velocity.x += (rawVelocity.x - velocity.x) * velFactor;
+  velocity.y += (rawVelocity.y - velocity.y) * velFactor;
+  // A first-order follow lags a moving target by velocity * tau at steady
+  // state (tau = half-life / ln2). Aiming that far AHEAD of the leader
+  // cancels the lag exactly, so a fast-falling marble stays at its anchor
+  // point instead of drifting off-screen — worst near the goal, where the
+  // zoom magnifies the same world-space lag several times over.
+  const lead = CAMERA_SMOOTH_MS / Math.LN2;
+  const aimX = target.x + velocity.x * lead;
+  const aimY = target.y + velocity.y * lead;
+  position.x += (aimX - position.x) * factor;
+  position.y += (aimY - position.y) * factor;
   zoom += (targetZoom - zoom) * factor;
 }
 

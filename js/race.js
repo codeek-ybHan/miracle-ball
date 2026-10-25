@@ -3,7 +3,9 @@ import * as map from './map.js';
 import * as particleManager from './particleManager.js';
 import * as camera from './camera.js';
 import { Marble } from './entities/marble.js';
+import { GATE_BAR_CATEGORY } from './entities/spinner.js';
 import {
+  FINISH,
   GOAL_Y,
   BUMPER_FLASH_MS,
   MAGNET_RADIUS,
@@ -71,12 +73,16 @@ export class Race {
     this.windmillGate = this.walls.find((b) => b.label === 'windmillGate');
     physics.addBodies(this.walls);
 
-    const spawnCenterX = map.centerX(30);
+    // The dark course's hand-built opening (see map.js's createIntro) isn't
+    // the winding tube, so wall-push must stay off inside it and marbles
+    // spawn in its chute instead of across the tube's width.
+    this.introEndY = course.introEndY ?? 0;
+    const spawnCenterX = course.spawnCenterX ?? map.centerX(30);
     const spawnHalfWidth = map.tubeHalfWidthAt(30);
     const shape = getThemeShape(themeId);
     const order = shuffle(names);
     this.marbles = order.map(
-      (name, i) => new Marble(name, i, order.length, spawnCenterX, spawnHalfWidth, shape)
+      (name, i) => new Marble(name, i, order.length, spawnCenterX, spawnHalfWidth, shape, course.spawnCenterX !== undefined)
     );
     physics.addBodies(this.marbles.map((m) => m.body));
 
@@ -167,6 +173,7 @@ export class Race {
     this.spinners.forEach((s) => s.update(deltaMs, leadY));
     this.magnetClock += deltaMs;
     this.vortexClock += deltaMs;
+    this.releaseOverCaught(deltaMs);
     this.marbles.forEach((m) => {
       if (m.finished) return;
       m.jitter();
@@ -204,6 +211,11 @@ export class Race {
     this.marbles.forEach((m) => {
       if (!m.finished && m.body.position.y > GOAL_Y) {
         m.finished = true;
+        // Out of the race: leave the marbles' collision category (0x0002) so
+        // nobody racing can bump into, or be blocked by, a finished marble —
+        // it still rests on the walls/floor like before.
+        m.body.collisionFilter.category = 0x0004;
+        m.body.collisionFilter.mask = 0x0001;
         m.rank = this.finishOrder.length + 1;
         this.finishOrder.push(m);
         particleManager.spawnSpark(m.body.position.x, m.body.position.y, m.color, 36);
@@ -219,10 +231,22 @@ export class Race {
       const leader = this.marbles
         .filter((m) => !m.finished)
         .sort((a, b) => b.body.position.y - a.body.position.y)[0];
-      if (leader) camera.follow(leader.body.position.x, leader.body.position.y);
+      if (leader) camera.follow(leader.body.position.x, leader.body.position.y, leader.body.velocity.x, leader.body.velocity.y);
     }
 
     camera.update(deltaMs);
+  }
+
+  // Finish bar safety valve: a marble that keeps getting thrown back by the
+  // bar for FINISH.maxCatchMs stops colliding with it and drops through.
+  releaseOverCaught(deltaMs) {
+    const bar = this.spinners.find((s) => s.gate);
+    if (!bar || !bar.released) return;
+    this.marbles.forEach((m) => {
+      if (m.finished || m.body.position.y < bar.gate.holdUntilY) return;
+      m.caughtMs = (m.caughtMs ?? 0) + deltaMs;
+      if (m.caughtMs > FINISH.maxCatchMs) m.body.collisionFilter.mask &= ~GATE_BAR_CATEGORY;
+    });
   }
 
   clampSpeeds() {
@@ -422,6 +446,7 @@ export class Race {
   // reads as a gentle steer back toward the middle, not an invisible wall.
   applyWallPush(marble) {
     const { x, y } = marble.body.position;
+    if (y < this.introEndY) return;
     const center = map.centerX(y);
     const halfWidth = map.tubeHalfWidthAt(y);
     const offsetFromCenter = x - center;
