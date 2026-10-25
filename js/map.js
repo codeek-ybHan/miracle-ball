@@ -527,7 +527,10 @@ function createDarkCourse() {
   // in a narrow stretch the peg gaps shrink below a marble's diameter and
   // marbles end up resting on top of the pegs. Sits between the bounce pad
   // (2698) and the first slalom plank (3878).
-  pegField(3200, 55 * S, 7, 5, bodies);
+  // 10 rows x 7 pegs (was 7 x 5): with 5 pegs the gaps were ~60px, almost 4
+  // marble diameters wide, so marbles just drifted through. 7 pegs leaves
+  // ~30px (about 2 diameters) — still passable, but every marble gets hit.
+  pegField(3200, 55 * S, 10, 7, bodies);
 
   // 6b. Bumper arena, moved here from the opening: the open stretch after the
   // last slalom plank (4340) and before the gate row (5192). Bumpers only need
