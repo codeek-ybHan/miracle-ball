@@ -44,7 +44,7 @@ export const TUBE_WIDTH_PERIOD = 2000 * S; // px per full narrow-wide cycle
 export const WAVE_AMPLITUDE = 110;
 export const WAVE_PERIOD = 1000 * S; // px per full left-right cycle
 
-export const GRAVITY_Y = 0.45;
+export const GRAVITY_Y = 0.9;
 
 // Finish slot + spinning bar (dark theme; see map.js's 11d). Sizes are in
 // lazygyu/roulette's marble-radius units (1 unit = 32px here). Kept in one
