@@ -6,6 +6,7 @@ import { Marble } from './entities/marble.js';
 import { GATE_BAR_CATEGORY } from './entities/spinner.js';
 import {
   FINISH,
+  WALL_THICKNESS,
   GOAL_Y,
   BUMPER_FLASH_MS,
   MAGNET_RADIUS,
@@ -106,7 +107,11 @@ export class Race {
           particleManager.spawnSpark(other.position.x, other.position.y, COLORS.peg, 5);
         } else if (other.label === 'spinner') {
           const marbleBody = bodyA.label === 'marble' ? bodyA : bodyB;
-          particleManager.spawnSpark(marbleBody.position.x, marbleBody.position.y, COLORS.spinner, 10);
+          // The finish bar keeps hitting the same marbles over and over, so
+          // a spark burst per hit just litters the screen — no sparks there.
+          if (other.collisionFilter.category !== GATE_BAR_CATEGORY) {
+            particleManager.spawnSpark(marbleBody.position.x, marbleBody.position.y, COLORS.spinner, 10);
+          }
         } else if (other.label === 'slalomPlank') {
           // A direct velocity kick (same reasoning as the bounce pad above)
           // rather than trusting restitution alone — a marble sliding down
@@ -169,43 +174,30 @@ export class Race {
   }
 
   update(deltaMs) {
-    const leadY = this.marbles.reduce((y, m) => Math.max(y, m.body.position.y), -Infinity);
-    this.spinners.forEach((s) => s.update(deltaMs, leadY));
-    this.magnetClock += deltaMs;
-    this.vortexClock += deltaMs;
-    this.releaseOverCaught(deltaMs);
-    this.marbles.forEach((m) => {
-      if (m.finished) return;
-      m.jitter();
-      this.applyMagnets(m);
-      this.applyWindVortices(m);
-      this.applyWallPush(m);
-      this.applyFunnelDamping(m);
-    });
-    // Live 1st/2nd place, recomputed fresh every frame (not cached from the
-    // last rank-panel update) — applySlowZones needs to know exactly who's
-    // out front *right now*, since the whole point is that it only ever
-    // pushes back on whoever that is at this instant, not on everyone.
-    this.applySlowZones(this.getUnfinishedRanking().slice(0, 2));
     // Matter's collision check is discrete: it only looks at where a body
-    // ends up after a step, never the path it swept to get there. The speed
-    // cap below assumes a ~16.7ms (60fps) step, but main.js's rAF loop can
-    // hand us a delta up to 50ms after a lag spike — feeding that whole
-    // chunk into one Engine.update makes a fast marble's single-step
-    // displacement 2-3x what the cap was sized for, punching clean through
-    // wall/peg thickness. Splitting into fixed-size sub-steps (and
-    // re-clamping speed before each one) keeps every individual Matter step
-    // within the margin the cap was designed around, regardless of how
-    // large the real frame delta was.
+    // ends up after a step, never the path it swept to get there, and every
+    // force/speed cap in here is tuned for a 60fps step. The rAF rate is not
+    // the same everywhere (Safari/ProMotion/low-power mode hand us anywhere
+    // from ~8ms to 50ms), so the whole simulation — forces, spinner/finish-bar
+    // motion, speed caps, the physics step itself — advances in fixed
+    // 1/60s ticks driven by an accumulator, never by the raw frame delta.
+    // Same course, same behaviour on every browser and refresh rate, and a
+    // marble's per-step displacement never exceeds what the caps were sized
+    // for (which is what lets one punch through the finish bar or a wall).
     const FIXED_STEP_MS = 1000 / 60;
-    let remaining = deltaMs;
-    while (remaining > 0) {
-      const dt = Math.min(remaining, FIXED_STEP_MS);
-      this.clampSpeeds();
-      physics.step(dt);
-      remaining -= dt;
+    const MAX_STEPS_PER_FRAME = 5;
+    this.simAcc = Math.min((this.simAcc ?? 0) + Math.max(deltaMs, 0), FIXED_STEP_MS * MAX_STEPS_PER_FRAME);
+    while (this.simAcc >= FIXED_STEP_MS) {
+      this.simAcc -= FIXED_STEP_MS;
+      this.fixedStep(FIXED_STEP_MS);
     }
     this.clampSpeeds();
+    // Leftover fraction of a tick, so rendering can interpolate (see
+    // Marble.getPosition).
+    const alpha = this.simAcc / FIXED_STEP_MS;
+    this.marbles.forEach((m) => {
+      m.renderAlpha = alpha;
+    });
     particleManager.update(deltaMs);
 
     this.marbles.forEach((m) => {
@@ -231,10 +223,65 @@ export class Race {
       const leader = this.marbles
         .filter((m) => !m.finished)
         .sort((a, b) => b.body.position.y - a.body.position.y)[0];
-      if (leader) camera.follow(leader.body.position.x, leader.body.position.y, leader.body.velocity.x, leader.body.velocity.y);
+      if (leader) {
+        const p = leader.getPosition();
+        camera.follow(p.x, p.y, leader.body.velocity.x, leader.body.velocity.y);
+      }
     }
 
     camera.update(deltaMs);
+  }
+
+  fixedStep(dt) {
+    const leadY = this.marbles.reduce((y, m) => Math.max(y, m.body.position.y), -Infinity);
+    this.spinners.forEach((s) => s.update(dt, leadY));
+    this.magnetClock += dt;
+    this.vortexClock += dt;
+    this.releaseOverCaught(dt);
+    this.marbles.forEach((m) => {
+      if (m.finished) return;
+      m.jitter();
+      this.applyMagnets(m);
+      this.applyWindVortices(m);
+      this.applyWallPush(m);
+      this.applyFunnelDamping(m);
+    });
+    // Live 1st/2nd place, recomputed fresh every tick — applySlowZones needs
+    // to know exactly who's out front *right now*, since the whole point is
+    // that it only ever pushes back on whoever that is at this instant.
+    this.applySlowZones(this.getUnfinishedRanking().slice(0, 2));
+    this.clampSpeeds();
+    this.rescueEscaped();
+    this.marbles.forEach((m) => m.snapshot());
+    physics.step(dt);
+  }
+
+  // Last-resort net for a marble that tunneled through a wall (or went NaN)
+  // despite the fixed step: it would otherwise fall straight down outside
+  // the tube past every obstacle. Put it back on the tube's centerline at the
+  // same height so it still has to run the rest of the course.
+  rescueEscaped() {
+    // Finish slot: once a marble is below the funnel's throat it has to be in
+    // the slot. One squeezed between the turning bar and the funnel plank can
+    // get pushed out the other side and would fall down beside the slot, past
+    // the finish — drop it back in just above the throat instead.
+    const bar = this.spinners.find((s) => s.gate);
+    const slotX = bar && bar.gate.hub.x + (1.1 + FINISH.slotWidth / 2) * FINISH.unit;
+    this.marbles.forEach((m) => {
+      if (m.finished) return;
+      const { x, y } = m.body.position;
+      if (bar && y > bar.gate.hub.y + 30 && Math.abs(x - slotX) > FINISH.slotWidth * FINISH.unit + 20) {
+        physics.setBodyPosition(m.body, { x: slotX, y: bar.gate.hub.y - 60 });
+        physics.setBodyVelocity(m.body, { x: 0, y: 0 });
+        return;
+      }
+      if (y < this.introEndY) return;
+      const limit = map.tubeHalfWidthAt(y) + WALL_THICKNESS + 40;
+      if (Number.isFinite(x + y) && Math.abs(x - map.centerX(y)) <= limit) return;
+      const safeY = Number.isFinite(y) ? y : this.introEndY + 50;
+      physics.setBodyPosition(m.body, { x: map.centerX(safeY), y: safeY });
+      physics.setBodyVelocity(m.body, { x: 0, y: 0 });
+    });
   }
 
   // Finish bar safety valve: a marble that keeps getting thrown back by the

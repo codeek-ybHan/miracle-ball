@@ -47,7 +47,11 @@ export class Spinner {
       physics.setBodyPosition(
         this.body,
         { x: hub.x + Math.cos(this.angle) * centerOffset, y: hub.y + Math.sin(this.angle) * centerOffset },
-        this.pushMarbles
+        // No linear velocity from the position change: with it, a marble
+        // pinned between the bar and the funnel plank got shoved clean
+        // through the plank (headless sim: ~1 marble in 6 fell out beside
+        // the slot). The angular push from setBodyAngle below still lifts it.
+        false
       );
     }
     physics.setBodyAngle(this.body, this.angle, this.pushMarbles);

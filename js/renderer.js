@@ -315,7 +315,10 @@ function drawMarbles(marbles, dynamicZoom, slowedSet) {
       // drawWall already uses for rotated polygons. body.vertices are
       // always absolute world-space, already rotated/translated by Matter
       // every step, so no extra ctx.rotate needed.
+      ctx.save();
+      ctx.translate(pos.x - m.body.position.x, pos.y - m.body.position.y);
       pathVertices(m.body);
+      ctx.restore();
     }
     ctx.fillStyle = m.color;
     ctx.fill();

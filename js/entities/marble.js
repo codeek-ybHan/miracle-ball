@@ -75,8 +75,21 @@ export class Marble {
     });
   }
 
+  // Physics advances in fixed 1/60s ticks (see race.js's update) while frames
+  // arrive at whatever rate the browser gives, so drawing body.position
+  // directly makes a marble (and its name) move in uneven hops — 0, 1 or 2
+  // ticks per frame. Called right before each tick: remembers where the marble
+  // was, so getPosition can blend toward where it is by renderAlpha.
+  snapshot() {
+    this.prevX = this.body.position.x;
+    this.prevY = this.body.position.y;
+  }
+
   getPosition() {
-    return this.body.position;
+    const { x, y } = this.body.position;
+    if (this.prevX === undefined) return { x, y };
+    const a = this.renderAlpha ?? 1;
+    return { x: this.prevX + (x - this.prevX) * a, y: this.prevY + (y - this.prevY) * a };
   }
 
   jitter() {
